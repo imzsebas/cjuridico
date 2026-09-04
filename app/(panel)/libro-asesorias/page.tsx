@@ -18,6 +18,7 @@ type Registro = {
   fecha_asignacion: string | null;
   nombre_estudiante: string | null;
   codigo_estudiante: string | null;
+  pdf_url: string | null;
 };
 
 // Acepta "DD/MM/AAAA" y también "D/M/AA" (sin ceros a la izquierda, año corto)
@@ -113,6 +114,7 @@ export default function LibroAsesoriasPage() {
               <th>Fecha</th>
               <th>Área</th>
               <th>Estudiante asignado</th>
+              <th>PDF</th>
               <th></th>
             </tr>
           </thead>
@@ -129,6 +131,26 @@ export default function LibroAsesoriasPage() {
                     <td>{dato(r.area_derecho)}</td>
                     <td>{dato(r.nombre_estudiante)}</td>
                     <td>
+                      {r.pdf_url ? (
+                        <a
+                          href={r.pdf_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          download
+                          className="btn-expandir"
+                          title="Descargar PDF de esta asesoría"
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M12 3v12" />
+                            <polyline points="7 10 12 15 17 10" />
+                            <path d="M4 19h16" />
+                          </svg>
+                        </a>
+                      ) : (
+                        <span className="sin-dato" title="No hay PDF guardado para esta asesoría">—</span>
+                      )}
+                    </td>
+                    <td>
                       <button
                         type="button"
                         className={`btn-expandir${abierto ? ' abierto' : ''}`}
@@ -144,7 +166,7 @@ export default function LibroAsesoriasPage() {
                   </tr>
                   {abierto && (
                     <tr className="fila-detalle">
-                      <td colSpan={6}>
+                      <td colSpan={7}>
                         <dl className="detalle-grid">
                           <div>
                             <dt>Número de documento</dt>
