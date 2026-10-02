@@ -60,6 +60,27 @@ export function Texto({
   );
 }
 
+// Combo box: lista desplegable con opciones fijas
+export function Lista({
+  k, label, opciones, placeholder = 'Seleccione una opción',
+}: {
+  k: string;
+  label: string;
+  opciones: string[];
+  placeholder?: string;
+}) {
+  const { valores, set } = useFormulario();
+  return (
+    <div className="rf-campo">
+      <label htmlFor={`rf-${k}`}>{label}</label>
+      <select id={`rf-${k}`} value={valores[k] ?? ''} onChange={(e) => set(k, e.target.value)}>
+        <option value="">{placeholder}</option>
+        {opciones.map((o) => <option key={o} value={o}>{o}</option>)}
+      </select>
+    </div>
+  );
+}
+
 // Casilla independiente (se pueden marcar varias)
 export function Casilla({ k, label }: { k: string; label: string }) {
   const { valores, set } = useFormulario();

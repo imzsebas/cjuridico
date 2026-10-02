@@ -137,12 +137,14 @@ export async function generarPdfRecepcion(valores: Valores): Promise<Uint8Array>
   }
 
   // Casillas dibujadas en el PDF que no tienen campo: se marcan con una X
+  // (o con el guion "-" si no se eligió ninguna de las dos opciones)
   const paginas = doc.getPages();
   for (const [clave, pos] of Object.entries(MARCAS_SIN_CAMPO)) {
     if (!datos[clave] || llenados.has(clave)) continue;
+    const marca = datos[clave] === '-' ? '-' : 'X';
     const tam = 11;
-    const ancho = fuenteNegrita.widthOfTextAtSize('X', tam);
-    paginas[pos.pagina].drawText('X', {
+    const ancho = fuenteNegrita.widthOfTextAtSize(marca, tam);
+    paginas[pos.pagina].drawText(marca, {
       x: pos.x - ancho / 2,
       y: pos.y - tam * 0.35,
       size: tam,

@@ -17,6 +17,10 @@ type Estudiante = {
   nivel_consultorio: string;
 };
 
+type CasoAsignado = { asesoria_no: string | null; nombres_apellidos: string | null; area_derecho: string | null };
+
+const normalizar = (s: string) => s.trim().toLowerCase();
+
 const VACIO = {
   nombre_estudiante: '', codigo_estudiante: '', telefono_estudiante: '',
   correo_estudiante: '', nivel_consultorio: NIVELES[0] as string,
@@ -29,6 +33,11 @@ export default function EstudiantesPage() {
   const [error, setError] = useState<string | null>(null);
   const [modal, setModal] = useState<{ id: string | null; datos: typeof VACIO } | null>(null);
   const [guardando, setGuardando] = useState(false);
+
+  // Modal con toda la información del estudiante (se abre al tocar una fila)
+  const [detalle, setDetalle] = useState<Estudiante | null>(null);
+  const [casos, setCasos] = useState<CasoAsignado[] | null>(null);
+  const [errorCasos, setErrorCasos] = useState<string | null>(null);
 
   // --- Búsqueda y filtro ---
   const [busqueda, setBusqueda] = useState('');
@@ -92,6 +101,48 @@ export default function EstudiantesPage() {
     return () => { cancelado = true; };
   }, [pagina, busquedaAplicada, filtroNivel, recarga]);
 
+  // Asesorías asignadas al estudiante: se piden solo cuando se abre el modal.
+  // "nombre_estudiante" puede traer varios nombres separados por coma, por eso se filtra después.
+  useEffect(() => {
+    if (!detalle) return;
+    let cancelado = false;
+    async function cargarCasos(nombre: string) {
+      setCasos(null);
+      setErrorCasos(null);
+      const { data, error } = await supabase
+        .from('libro_asesorias')
+        .select('asesoria_no, nombres_apellidos, area_derecho, nombre_estudiante')
+        .ilike('nombre_estudiante', `%${nombre.replace(/[\\%_]/g, '\\$&')}%`)
+        .order('asesoria_no', { ascending: false })
+        .limit(500);
+      if (cancelado) return;
+      if (error) {
+        setErrorCasos(error.message);
+        return;
+      }
+      const propios = (data ?? []).filter((c: CasoAsignado & { nombre_estudiante: string | null }) =>
+        (c.nombre_estudiante ?? '').split(',').some((n) => normalizar(n) === normalizar(nombre))
+      );
+      setCasos(propios);
+    }
+    cargarCasos(detalle.nombre_estudiante);
+    return () => { cancelado = true; };
+  }, [detalle]);
+
+  function abrirEditar(e: Estudiante) {
+    setDetalle(null);
+    setModal({
+      id: e.id,
+      datos: {
+        nombre_estudiante: e.nombre_estudiante,
+        codigo_estudiante: e.codigo_estudiante,
+        telefono_estudiante: e.telefono_estudiante ?? '',
+        correo_estudiante: e.correo_estudiante ?? '',
+        nivel_consultorio: e.nivel_consultorio,
+      },
+    });
+  }
+
   async function guardar() {
     if (!modal) return;
     setGuardando(true);
@@ -110,7 +161,7 @@ export default function EstudiantesPage() {
     if (!confirm('¿Eliminar este estudiante del directorio?')) return;
     const { error } = await supabase.from('estudiantes').delete().eq('id', id);
     if (error) setError(error.message);
-    else setRecarga((n) => n + 1);
+    else { setDetalle(null); setRecarga((n) => n + 1); }
   }
 
   return (
@@ -163,7 +214,7 @@ export default function EstudiantesPage() {
 
       {total > 0 && estudiantes.length > 0 && (
         <div className="admin-table-card" style={{ opacity: cargando ? 0.6 : 1 }}>
-          <table className="admin-table">
+          <table className="admin-table admin-table-compacta">
             <thead>
               <tr>
                 <th>Nombre</th>
@@ -171,37 +222,22 @@ export default function EstudiantesPage() {
                 <th>Teléfono</th>
                 <th>Correo</th>
                 <th>Nivel de consultorio</th>
-                <th>Acciones</th>
               </tr>
             </thead>
             <tbody>
               {estudiantes.map((e) => (
-                <tr key={e.id}>
+                <tr
+                  key={e.id}
+                  className="fila-clic"
+                  tabIndex={0}
+                  onClick={() => setDetalle(e)}
+                  onKeyDown={(ev) => { if (ev.key === 'Enter') setDetalle(e); }}
+                >
                   <td>{e.nombre_estudiante}</td>
                   <td>{e.codigo_estudiante}</td>
                   <td>{e.telefono_estudiante || <span className="sin-dato">—</span>}</td>
                   <td>{e.correo_estudiante || <span className="sin-dato">—</span>}</td>
                   <td>{e.nivel_consultorio}</td>
-                  <td>
-                    <div className="admin-acciones">
-                      <button
-                        className="btn-chip"
-                        onClick={() => setModal({
-                          id: e.id,
-                          datos: {
-                            nombre_estudiante: e.nombre_estudiante,
-                            codigo_estudiante: e.codigo_estudiante,
-                            telefono_estudiante: e.telefono_estudiante ?? '',
-                            correo_estudiante: e.correo_estudiante ?? '',
-                            nivel_consultorio: e.nivel_consultorio,
-                          },
-                        })}
-                      >
-                        Editar
-                      </button>
-                      <button className="btn-chip" onClick={() => eliminar(e.id)}>Eliminar</button>
-                    </div>
-                  </td>
                 </tr>
               ))}
             </tbody>
@@ -212,6 +248,54 @@ export default function EstudiantesPage() {
       <Paginacion pagina={pagina} total={total} onCambiar={setPagina} />
       </div>
     </div>
+
+    {/* Modal: información completa del estudiante (aquí están Editar y Eliminar) */}
+    {detalle && (
+      <div className="modal-overlay" onClick={() => setDetalle(null)}>
+        <div className="modal-card modal-card-ancho" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-card-cuerpo">
+            <div className="caso-encabezado">
+              <h3>{detalle.nombre_estudiante}</h3>
+            </div>
+
+            <div className="caso-datos" style={{ marginBottom: 18 }}>
+              <div className="caso-dato"><span>Código</span><p>{detalle.codigo_estudiante || '—'}</p></div>
+              <div className="caso-dato"><span>Nivel de consultorio</span><p>{detalle.nivel_consultorio || '—'}</p></div>
+              <div className="caso-dato"><span>Teléfono</span><p>{detalle.telefono_estudiante || '—'}</p></div>
+              <div className="caso-dato"><span>Correo</span><p>{detalle.correo_estudiante || '—'}</p></div>
+            </div>
+
+            <h4 className="caso-seccion-titulo">Asesorías asignadas</h4>
+            {errorCasos ? (
+              <div className="form-message error">{errorCasos}</div>
+            ) : casos === null ? (
+              <p className="admin-estado-cargando" style={{ margin: 0 }}>Cargando asesorías...</p>
+            ) : casos.length === 0 ? (
+              <p className="admin-estado-vacio" style={{ margin: 0 }}>Todavía no tiene asesorías asignadas.</p>
+            ) : (
+              <>
+                <p className="texto-secundario">{casos.length} {casos.length === 1 ? 'asesoría asignada' : 'asesorías asignadas'}</p>
+                <div style={{ maxHeight: 280, overflowY: 'auto' }}>
+                  {casos.map((c, i) => (
+                    <div key={`${c.asesoria_no ?? 'sin-numero'}-${i}`} className="detalle-caso-item">
+                      <div><strong>N° {c.asesoria_no || 'sin número'}</strong></div>
+                      <div>{c.nombres_apellidos || '—'}</div>
+                      <div className="detalle-caso-area">{c.area_derecho || '—'}</div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="modal-acciones">
+            <button className="btn-secundario" onClick={() => setDetalle(null)}>Cerrar</button>
+            <button className="btn-secundario btn-eliminar" onClick={() => eliminar(detalle.id)}>Eliminar</button>
+            <button className="btn-primary" onClick={() => abrirEditar(detalle)}>Editar</button>
+          </div>
+        </div>
+      </div>
+    )}
 
     {modal && (
       <div className="modal-overlay">

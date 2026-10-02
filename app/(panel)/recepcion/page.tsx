@@ -5,63 +5,19 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase'; // ajusta la ruta si tu cliente está en otro lugar
 import PanelTopbar from '@/components/PanelTopbar';
 import {
-  Casilla, Fila, FormProvider, GrupoUnico, Seccion, SiNo, Texto, useFormulario,
+  Casilla, Fila, FormProvider, GrupoUnico, Lista, Seccion, SiNo, Texto, useFormulario,
 } from '@/components/recepcion/Controles';
 import {
   CAMPOS_INDIVIDUALES, Medidor, Valores, crearMedidor, descargarArchivo,
   generarPdfRecepcion, partirEnLineas,
 } from '@/lib/formatoRecepcion';
+import {
+  AREAS_DERECHO, ASESORIA_REPARTO, COMO_NOS_CONOCIO, DISCAPACIDADES, DOCUMENTOS, ESCOLARIDAD,
+  ESTADO_CIVIL, HECHOS, OCUPACION, POBLACION, SECCIONES, SIN_SELECCION, SIN_TEXTO,
+  TIPO_IDENTIFICACION, completarEnBlanco, revisarFormulario,
+} from '@/lib/estructuraRecepcion';
 
-const DISCAPACIDADES = [
-  { k: 'discapacidad_auditiva', label: 'Auditiva' },
-  { k: 'discapacidad_sordoceguera', label: 'Sordo-ceguera' },
-  { k: 'discapacidad_fisica', label: 'Física' },
-  { k: 'discapacidad_intelectual', label: 'Intelectual' },
-  { k: 'discapacidad_psicosocial', label: 'Psicosocial' },
-  { k: 'discapacidad_multiple', label: 'Múltiple' },
-];
-
-const POBLACION = [
-  { k: 'poblacion_mujer_embarazada', label: 'Mujer embarazada' },
-  { k: 'poblacion_pobreza_extrema', label: 'Situación de pobreza extrema / exclusión social' },
-  { k: 'poblacion_mujer_violencia_genero', label: 'Mujer víctima de violencia basada en género' },
-  { k: 'poblacion_lgtbiq', label: 'Población LGTBIQ+ en riesgo' },
-  { k: 'poblacion_victima_conflicto', label: 'Víctima del conflicto armado / desplazado' },
-  { k: 'poblacion_migrante_refugiado', label: 'Migrante refugiado' },
-  { k: 'poblacion_mayor_desproteccion', label: 'Persona mayor en desprotección' },
-  { k: 'poblacion_nino_adolescente_riesgo', label: 'Niño/a o adolescente en riesgo' },
-  { k: 'poblacion_privada_libertad', label: 'Persona privada de la libertad' },
-  { k: 'poblacion_defensora_ddhh', label: 'Defensor@ de derechos humanos / lideresa comunitaria / mujer rural' },
-  { k: 'poblacion_indigena', label: 'Indígena' },
-  { k: 'poblacion_campesino', label: 'Campesino' },
-  { k: 'poblacion_afro', label: 'Afro' },
-  { k: 'poblacion_room', label: 'Room' },
-  { k: 'poblacion_raizal_palenquera', label: 'Raizal / palenquera' },
-];
-
-const ESCOLARIDAD = [
-  { k: 'escolaridad_primaria', label: 'Primaria' },
-  { k: 'escolaridad_bachiller', label: 'Bachiller' },
-  { k: 'escolaridad_tecnico', label: 'Técnico' },
-  { k: 'escolaridad_pregrado', label: 'Pregrado' },
-  { k: 'escolaridad_posgrado', label: 'Posgrado' },
-  { k: 'escolaridad_ninguna', label: 'Ninguna' },
-];
-
-const COMO_NOS_CONOCIO = [
-  { k: 'conocio_redes_sociales', label: 'Redes sociales' },
-  { k: 'conocio_sede_fisica', label: 'Sede física' },
-  { k: 'conocio_programa_radial', label: 'Programa radial' },
-  { k: 'conocio_pagina_web', label: 'Página web' },
-  { k: 'conocio_eventos_institucionales', label: 'Eventos institucionales' },
-  { k: 'conocio_referido', label: 'Referido' },
-  { k: 'conocio_ferias_educativas', label: 'Ferias educativas en articulación con otra entidad' },
-  { k: 'conocio_publicidad', label: 'Publicidad' },
-  { k: 'conocio_brigada_juridica', label: 'Brigada jurídica' },
-];
-
-const HECHOS = [1, 2, 3, 4, 5];
-const DOCUMENTOS = [1, 2, 3, 4, 5];
+const ULTIMO_PASO = SECCIONES.length - 1;
 
 const aInputFecha = (f: string) => {
   const m = f.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
@@ -111,6 +67,8 @@ export default function RecepcionPage() {
   const router = useRouter();
   const [valores, setValores] = useState<Valores>({});
   const [medidor, setMedidor] = useState<Medidor | null>(null);
+  const [paso, setPaso] = useState(0);
+  const [aviso, setAviso] = useState(false); // ventana de "hay espacios sin llenar"
   const [guardando, setGuardando] = useState(false);
   const [mensaje, setMensaje] = useState<{ tipo: 'error' | 'success'; texto: string } | null>(null);
   const [guardado, setGuardado] = useState<{ numero: number; bytes: Uint8Array; nombreArchivo: string } | null>(null);
@@ -118,6 +76,10 @@ export default function RecepcionPage() {
   const set = useCallback((k: string, v: string) => setValores((p) => ({ ...p, [k]: v })), []);
   const setVarios = useCallback((c: Valores) => setValores((p) => ({ ...p, ...c })), []);
   const contexto = useMemo(() => ({ valores, set, setVarios }), [valores, set, setVarios]);
+
+  // Espacios en blanco de cada sección (sirve para el check de los pasos y para la advertencia)
+  const faltantes: string[][] = useMemo(() => revisarFormulario(valores), [valores]);
+  const totalFaltantes = faltantes.reduce((suma: number, lista: string[]) => suma + lista.length, 0);
 
   // Solo monitores o administradores pueden entrar aquí
   useEffect(() => {
@@ -143,29 +105,56 @@ export default function RecepcionPage() {
     return () => { cancelado = true; clearTimeout(arranque); };
   }, []);
 
+  function irAPaso(n: number) {
+    setPaso(Math.min(Math.max(n, 0), ULTIMO_PASO));
+    document.querySelector('.cp-content')?.scrollTo({ top: 0 });
+  }
+
   function nuevoFormulario() {
     setValores(valoresIniciales());
     setGuardado(null);
     setMensaje(null);
-    document.querySelector('.cp-content')?.scrollTo({ top: 0 });
+    setAviso(false);
+    irAPaso(0);
   }
 
-  async function guardar() {
+  // Botón "Guardar y descargar PDF": primero revisa lo obligatorio y luego avisa de los espacios en blanco
+  function solicitarGuardado() {
     setMensaje(null);
 
-    const faltantes: string[] = [];
-    if (!valores.nombres_apellidos?.trim()) faltantes.push('el nombre del usuario');
-    if (!valores.estudiante_recepciona_nombre?.trim()) faltantes.push('el nombre del estudiante que recepciona');
-    if (faltantes.length) {
-      setMensaje({ tipo: 'error', texto: `Falta completar ${faltantes.join(' y ')}.` });
+    const obligatorios: { k: string; texto: string; paso: number }[] = [
+      { k: 'nombres_apellidos', texto: 'el nombre del usuario (sección 1)', paso: 0 },
+      { k: 'estudiante_recepciona_nombre', texto: 'el nombre del estudiante que recepciona (sección 6)', paso: ULTIMO_PASO },
+    ];
+    const sinLlenar = obligatorios.filter((o) => !valores[o.k]?.trim());
+    if (sinLlenar.length) {
+      setMensaje({ tipo: 'error', texto: `Falta completar ${sinLlenar.map((o) => o.texto).join(' y ')}.` });
+      irAPaso(sinLlenar[0].paso);
       return;
     }
 
+    if (totalFaltantes > 0) {
+      setAviso(true);
+      return;
+    }
+    guardar(valores);
+  }
+
+  // El usuario decidió descargar aunque haya espacios sin llenar
+  function descargarDeTodasFormas() {
+    const completo = completarEnBlanco(valores);
+    setValores(completo);
+    guardar(completo);
+  }
+
+  async function guardar(base: Valores) {
+    setMensaje(null);
     setGuardando(true);
     try {
       const medir = medidor ?? (await crearMedidor());
       for (const n of HECHOS) {
-        if (partirEnLineas(valores[`sintesis_hecho_${n}`] ?? '', medir).desborde) {
+        if (partirEnLineas(base[`sintesis_hecho_${n}`] ?? '', medir).desborde) {
+          irAPaso(ULTIMO_PASO);
           throw new Error(`El hecho ${n} no cabe en el espacio del formato. Acórtalo para poder guardar.`);
         }
       }
@@ -176,7 +165,7 @@ export default function RecepcionPage() {
 
       // Solo se guardan los campos con contenido
       const finales: Valores = {};
-      for (const [k, v] of Object.entries({ ...valores, asesoria_no: String(numero) })) {
+      for (const [k, v] of Object.entries({ ...base, asesoria_no: String(numero) })) {
         if (typeof v === 'string' && v.trim() !== '') finales[k] = v.trim();
       }
 
@@ -218,6 +207,7 @@ export default function RecepcionPage() {
       setMensaje({ tipo: 'error', texto });
     } finally {
       setGuardando(false);
+      setAviso(false);
     }
   }
 
@@ -229,7 +219,12 @@ export default function RecepcionPage() {
           <form
             className="rf"
             noValidate
-            onSubmit={(e) => { e.preventDefault(); if (!guardando && !guardado) guardar(); }}
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (guardando) return;
+              if (paso < ULTIMO_PASO) irAPaso(paso + 1);
+              else if (!guardado) solicitarGuardado();
+            }}
           >
             {guardado && (
               <div className="form-message success rf-exito">
@@ -247,188 +242,252 @@ export default function RecepcionPage() {
               </div>
             )}
 
+            {/* ───────── Indicador de secciones (se puede tocar cualquiera sin perder lo escrito) ───────── */}
+            <nav className="rf-pasos" aria-label="Secciones del formulario">
+              {SECCIONES.map((s, i) => {
+                const completa = faltantes[i].length === 0;
+                return (
+                  <button
+                    key={s.titulo}
+                    type="button"
+                    className={`rf-paso${i === paso ? ' activo' : ''}${completa ? ' completo' : ''}`}
+                    onClick={() => irAPaso(i)}
+                    aria-current={i === paso ? 'step' : undefined}
+                    title={s.titulo}
+                  >
+                    <span className="rf-paso-num">{completa ? '✓' : i + 1}</span>
+                    <span className="rf-paso-texto">{s.corto}</span>
+                  </button>
+                );
+              })}
+            </nav>
+            <div className="rf-progreso">Sección {paso + 1} de {SECCIONES.length}</div>
+
             {/* ───────── 1. Información del usuario ───────── */}
-            <Seccion titulo="Información del usuario">
-              <Fila>
-                <div className="rf-campo">
-                  <label htmlFor="rf-asesoria_no">N.º asesoría</label>
-                  <input id="rf-asesoria_no" type="text" readOnly value={guardado ? String(guardado.numero) : ''} placeholder="Se asigna al guardar" />
+            {paso === 0 && (
+              <Seccion titulo={`1. ${SECCIONES[0].titulo}`}>
+                <Fila>
+                  <div className="rf-campo">
+                    <label htmlFor="rf-asesoria_no">N.º asesoría</label>
+                    <input id="rf-asesoria_no" type="text" readOnly value={guardado ? String(guardado.numero) : ''} placeholder="Se asigna al guardar" />
+                  </div>
+                  <div className="rf-campo">
+                    <label htmlFor="rf-fecha">Fecha</label>
+                    <input
+                      id="rf-fecha"
+                      type="date"
+                      value={aInputFecha(valores.fecha ?? '')}
+                      onChange={(e) => set('fecha', deInputFecha(e.target.value))}
+                    />
+                  </div>
+                  <Texto k="hora_recepcion" label="Hora de recepción" tipo="time" />
+                </Fila>
+                <Fila columnas="2fr 1fr">
+                  <Texto k="nombres_apellidos" label="Nombre y apellido según documento de identidad *" />
+                  <Texto k="nombre_identitario" label="Nombre identitario" />
+                </Fila>
+                <Fila>
+                  <Texto k="contacto_1" label="N.º de contacto" tipo="tel" inputMode="tel" />
+                  <Texto k="contacto_2" label="Otro N.º de contacto" tipo="tel" inputMode="tel" />
+                  <Texto k="correo" label="Correo electrónico" />
+                </Fila>
+                <Fila columnas="1fr 2fr">
+                  <Texto k="cedula_numero" label="N.º de documento" />
+                  <Texto k="direccion" label="Ciudad / Dirección" />
+                </Fila>
+                <GrupoUnico titulo="Tipo de identificación" opciones={TIPO_IDENTIFICACION} />
+                <SiNo
+                  titulo="¿Presenta alguna discapacidad?"
+                  kSi="discapacidad_si"
+                  kNo="discapacidad_no"
+                  limpiar={DISCAPACIDADES.map((d) => d.k)}
+                >
+                  <div className="rf-grupo-titulo">Tipo de discapacidad</div>
+                  <div className="rf-opciones">
+                    {DISCAPACIDADES.map((d) => <Casilla key={d.k} k={d.k} label={d.label} />)}
+                  </div>
+                </SiNo>
+                <div className="rf-grupo">
+                  <div className="rf-grupo-titulo">Caracterización poblacional</div>
+                  <div className="rf-opciones rf-opciones-rejilla">
+                    {POBLACION.map((p) => <Casilla key={p.k} k={p.k} label={p.label} />)}
+                  </div>
+                  <div style={{ marginTop: 12, maxWidth: 420 }}>
+                    <Texto k="poblacion_otra" label="Otra" />
+                  </div>
                 </div>
-                <div className="rf-campo">
-                  <label htmlFor="rf-fecha">Fecha</label>
-                  <input
-                    id="rf-fecha"
-                    type="date"
-                    value={aInputFecha(valores.fecha ?? '')}
-                    onChange={(e) => set('fecha', deInputFecha(e.target.value))}
-                  />
-                </div>
-                <Texto k="hora_recepcion" label="Hora de recepción" tipo="time" />
-              </Fila>
-              <Fila columnas="2fr 1fr">
-                <Texto k="nombres_apellidos" label="Nombre y apellido según documento de identidad *" />
-                <Texto k="nombre_identitario" label="Nombre identitario" />
-              </Fila>
-              <Fila>
-                <Texto k="contacto_1" label="N.º de contacto" tipo="tel" inputMode="tel" />
-                <Texto k="contacto_2" label="Otro N.º de contacto" tipo="tel" inputMode="tel" />
-                <Texto k="correo" label="Correo electrónico" />
-              </Fila>
-              <Fila columnas="1fr 2fr">
-                <Texto k="cedula_numero" label="N.º de documento" />
-                <Texto k="direccion" label="Ciudad / Dirección" />
-              </Fila>
-              <GrupoUnico
-                titulo="Tipo de identificación"
-                opciones={[
-                  { k: 'documento_ti', label: 'TI' },
-                  { k: 'documento_cc', label: 'CC' },
-                  { k: 'documento_ce', label: 'CE' },
-                  { k: 'documento_ps', label: 'Pasaporte' },
-                ]}
-              />
-              <SiNo
-                titulo="¿Presenta alguna discapacidad?"
-                kSi="discapacidad_si"
-                kNo="discapacidad_no"
-                limpiar={DISCAPACIDADES.map((d) => d.k)}
-              >
-                <div className="rf-grupo-titulo">Tipo de discapacidad</div>
-                <div className="rf-opciones">
-                  {DISCAPACIDADES.map((d) => <Casilla key={d.k} k={d.k} label={d.label} />)}
-                </div>
-              </SiNo>
-              <div className="rf-grupo">
-                <div className="rf-grupo-titulo">Caracterización poblacional</div>
-                <div className="rf-opciones rf-opciones-rejilla">
-                  {POBLACION.map((p) => <Casilla key={p.k} k={p.k} label={p.label} />)}
-                </div>
-                <div style={{ marginTop: 12, maxWidth: 420 }}>
-                  <Texto k="poblacion_otra" label="Otra" />
-                </div>
-              </div>
-            </Seccion>
+              </Seccion>
+            )}
 
             {/* ───────── 2. Aspectos económicos ───────── */}
-            <Seccion titulo="Aspectos económicos e información laboral">
-              <GrupoUnico titulo="Escolaridad" opciones={ESCOLARIDAD} />
-              <div className="rf-grupo">
-                <div className="rf-grupo-titulo">Ocupación</div>
-                <div className="rf-opciones">
-                  <Casilla k="asalariado" label="Asalariado" />
-                  <Casilla k="independiente" label="Independiente" />
+            {paso === 1 && (
+              <Seccion titulo={`2. ${SECCIONES[1].titulo}`}>
+                <GrupoUnico titulo="Escolaridad" opciones={ESCOLARIDAD} />
+                <div className="rf-grupo">
+                  <div className="rf-grupo-titulo">Ocupación</div>
+                  <div className="rf-opciones">
+                    {OCUPACION.map((o) => <Casilla key={o.k} k={o.k} label={o.label} />)}
+                  </div>
                 </div>
-              </div>
-              <Fila>
-                <Texto k="ingresos_mensuales" label="Ingresos mensuales" inputMode="numeric" />
-                <Texto k="estrato" label="Estrato" inputMode="numeric" />
-              </Fila>
-              <Fila>
-                <Texto k="empresa_trabajo" label="Empresa donde trabaja" />
-                <Texto k="direccion_trabajo" label="Dirección del lugar de trabajo" />
-              </Fila>
-            </Seccion>
+                <Fila>
+                  <Texto k="ingresos_mensuales" label="Ingresos mensuales" inputMode="numeric" />
+                  <Texto k="estrato" label="Estrato" inputMode="numeric" />
+                </Fila>
+                <Fila>
+                  <Texto k="empresa_trabajo" label="Empresa donde trabaja" />
+                  <Texto k="direccion_trabajo" label="Dirección del lugar de trabajo" />
+                </Fila>
+              </Seccion>
+            )}
 
             {/* ───────── 3. Bienes ───────── */}
-            <Seccion titulo="Bienes">
-              <SiNo titulo="Vivienda propia o familiar" kSi="vivienda_propia_si" kNo="vivienda_propia_no" limpiar={['direccion_inmueble']}>
-                <Texto k="direccion_inmueble" label="Dirección del inmueble" />
-              </SiNo>
-              <SiNo titulo="Paga arriendo" kSi="paga_arriendo_si" kNo="paga_arriendo_no" limpiar={['valor_arriendo']}>
-                <Texto k="valor_arriendo" label="Valor de arriendo" inputMode="numeric" />
-              </SiNo>
-              <SiNo titulo="Lote propio" kSi="lote_propio_si" kNo="lote_propio_no" limpiar={['direccion_lote']}>
-                <Texto k="direccion_lote" label="Dirección" />
-              </SiNo>
-              <SiNo titulo="Vehículo" kSi="vehiculo_si" kNo="vehiculo_no" limpiar={['vehiculo_placa', 'vehiculo_marca', 'vehiculo_modelo']}>
-                <Fila>
-                  <Texto k="vehiculo_placa" label="Placa" />
-                  <Texto k="vehiculo_marca" label="Marca" />
-                  <Texto k="vehiculo_modelo" label="Modelo" />
-                </Fila>
-              </SiNo>
-              <SiNo titulo="Negocio" kSi="negocio_si" kNo="negocio_no" limpiar={['negocio_especifique']}>
-                <Texto k="negocio_especifique" label="Especifique" />
-              </SiNo>
-              <Texto k="bienes_otro_cual" label="Otro: ¿cuál?" />
-            </Seccion>
+            {paso === 2 && (
+              <Seccion titulo={`3. ${SECCIONES[2].titulo}`}>
+                <SiNo titulo="Vivienda propia o familiar" kSi="vivienda_propia_si" kNo="vivienda_propia_no" limpiar={['direccion_inmueble']}>
+                  <Texto k="direccion_inmueble" label="Dirección del inmueble" />
+                </SiNo>
+                <SiNo titulo="Paga arriendo" kSi="paga_arriendo_si" kNo="paga_arriendo_no" limpiar={['valor_arriendo']}>
+                  <Texto k="valor_arriendo" label="Valor de arriendo" inputMode="numeric" />
+                </SiNo>
+                <SiNo titulo="Lote propio" kSi="lote_propio_si" kNo="lote_propio_no" limpiar={['direccion_lote']}>
+                  <Texto k="direccion_lote" label="Dirección" />
+                </SiNo>
+                <SiNo titulo="Vehículo" kSi="vehiculo_si" kNo="vehiculo_no" limpiar={['vehiculo_placa', 'vehiculo_marca', 'vehiculo_modelo']}>
+                  <Fila>
+                    <Texto k="vehiculo_placa" label="Placa" />
+                    <Texto k="vehiculo_marca" label="Marca" />
+                    <Texto k="vehiculo_modelo" label="Modelo" />
+                  </Fila>
+                </SiNo>
+                <SiNo titulo="Negocio" kSi="negocio_si" kNo="negocio_no" limpiar={['negocio_especifique']}>
+                  <Texto k="negocio_especifique" label="Especifique" />
+                </SiNo>
+                <Texto k="bienes_otro_cual" label="Otro: ¿cuál?" />
+              </Seccion>
+            )}
 
             {/* ───────── 4. Información personal ───────── */}
-            <Seccion titulo="Información personal">
-              <GrupoUnico
-                titulo="Estado civil"
-                opciones={[
-                  { k: 'estado_civil_casado', label: 'Casado(a)' },
-                  { k: 'estado_civil_soltero', label: 'Soltero(a)' },
-                ]}
-              />
-              <SiNo titulo="Unión marital de hecho" kSi="umh_si" kNo="umh_no" />
-              <Fila>
-                <Texto k="personas_a_cargo" label="N.º personas a cargo" tipo="number" inputMode="numeric" />
-              </Fila>
-              <Fila>
-                <Texto k="nombre_conyuge" label="Nombre del cónyuge o compañero(a) permanente" />
-                <Texto k="conyuge_contacto" label="N.º de contacto del cónyuge o compañero(a) permanente" tipo="tel" inputMode="tel" />
-              </Fila>
-            </Seccion>
+            {paso === 3 && (
+              <Seccion titulo={`4. ${SECCIONES[3].titulo}`}>
+                <GrupoUnico titulo="Estado civil" opciones={ESTADO_CIVIL} />
+                <SiNo titulo="Unión marital de hecho" kSi="umh_si" kNo="umh_no" />
+                <Fila>
+                  <Texto k="personas_a_cargo" label="N.º personas a cargo" tipo="number" inputMode="numeric" />
+                </Fila>
+                <Fila>
+                  <Texto k="nombre_conyuge" label="Nombre del cónyuge o compañero(a) permanente" />
+                  <Texto k="conyuge_contacto" label="N.º de contacto del cónyuge o compañero(a) permanente" tipo="tel" inputMode="tel" />
+                </Fila>
+              </Seccion>
+            )}
 
             {/* ───────── 5. ¿Cómo nos conoció? ───────── */}
-            <Seccion titulo="¿Cómo nos conoció?">
-              <div className="rf-opciones rf-opciones-rejilla">
-                {COMO_NOS_CONOCIO.map((o) => <Casilla key={o.k} k={o.k} label={o.label} />)}
-              </div>
-            </Seccion>
+            {paso === 4 && (
+              <Seccion titulo={`5. ${SECCIONES[4].titulo}`}>
+                <div className="rf-opciones rf-opciones-rejilla">
+                  {COMO_NOS_CONOCIO.map((o) => <Casilla key={o.k} k={o.k} label={o.label} />)}
+                </div>
+              </Seccion>
+            )}
 
             {/* ───────── 6. Estudiante que recepciona ───────── */}
-            <Seccion titulo="Estudiante que recepciona">
-              <Fila columnas="2fr 1fr 1fr">
-                <Texto k="estudiante_recepciona_nombre" label="Nombres y apellidos *" />
-                <Texto k="estudiante_recepciona_codigo" label="Código" />
-                <Texto k="estudiante_recepciona_telefono" label="Teléfono" tipo="tel" inputMode="tel" />
-              </Fila>
+            {paso === 5 && (
+              <Seccion titulo={`6. ${SECCIONES[5].titulo}`}>
+                <Fila columnas="2fr 1fr 1fr">
+                  <Texto k="estudiante_recepciona_nombre" label="Nombres y apellidos *" />
+                  <Texto k="estudiante_recepciona_codigo" label="Código" />
+                  <Texto k="estudiante_recepciona_telefono" label="Teléfono" tipo="tel" inputMode="tel" />
+                </Fila>
 
-              <div className="rf-grupo">
-                <div className="rf-grupo-titulo">Síntesis de los hechos</div>
-                <p className="rf-ayuda">
-                  Escuche de manera atenta el relato y luego elabore un resumen claro, preciso y detallado en letra legible.
-                </p>
-                <div className="rf-hechos">
-                  {HECHOS.map((n) => <Hecho key={n} n={n} medidor={medidor} />)}
+                <div className="rf-grupo">
+                  <div className="rf-grupo-titulo">Síntesis de los hechos</div>
+                  <p className="rf-ayuda">
+                    Escuche de manera atenta el relato y luego elabore un resumen claro, preciso y detallado en letra legible.
+                  </p>
+                  <div className="rf-hechos">
+                    {HECHOS.map((n) => <Hecho key={n} n={n} medidor={medidor} />)}
+                  </div>
                 </div>
-              </div>
 
-              <div className="rf-grupo">
-                <div className="rf-grupo-titulo">Documentos aportados</div>
-                <div className="rf-fila">
-                  {DOCUMENTOS.map((n) => <Texto key={n} k={`documento_aportado_${n}`} label={`Documento ${n}`} />)}
+                <div className="rf-grupo">
+                  <div className="rf-grupo-titulo">Documentos aportados</div>
+                  <div className="rf-fila">
+                    {DOCUMENTOS.map((n) => <Texto key={n} k={`documento_aportado_${n}`} label={`Documento ${n}`} />)}
+                  </div>
                 </div>
-              </div>
 
-              <Fila>
-                <Texto k="area_derecho" label="Área de derecho" />
-                <Texto k="naturaleza_asunto" label="Naturaleza del asunto" />
-              </Fila>
+                <Fila>
+                  <Lista k="area_derecho" label="Área de derecho" opciones={AREAS_DERECHO} />
+                  <Texto k="naturaleza_asunto" label="Naturaleza del asunto" />
+                </Fila>
 
-              <GrupoUnico
-                titulo="Asesoría"
-                opciones={[
-                  { k: 'asesoria_con_reparto', label: 'Con reparto' },
-                  { k: 'asesoria_sin_reparto', label: 'Sin reparto' },
-                ]}
-              />
-            </Seccion>
+                <GrupoUnico titulo="Asesoría" opciones={ASESORIA_REPARTO} />
+              </Seccion>
+            )}
 
+            {/* ───────── Barra de navegación ───────── */}
             <div className="rf-barra">
               <div className="rf-barra-mensaje">
                 {mensaje && <span className={`rf-barra-texto ${mensaje.tipo}`}>{mensaje.texto}</span>}
                 {!mensaje && guardado && <span className="rf-barra-texto success">Guardado. Pulsa «Nueva recepción» para llenar otro formato.</span>}
-                {!mensaje && !guardado && <span className="rf-barra-ayuda">* Campos obligatorios. El N.º de asesoría se asigna al guardar.</span>}
+                {!mensaje && !guardado && (
+                  <span className="rf-barra-ayuda">
+                    * Campos obligatorios. Puedes moverte entre secciones sin perder lo que llevas escrito.
+                  </span>
+                )}
               </div>
-              <button type="submit" className="btn-primary" disabled={guardando || Boolean(guardado)}>
-                {guardando ? 'Guardando...' : 'Guardar y descargar PDF'}
-              </button>
+              <div className="rf-barra-botones">
+                <button type="button" className="btn-secundario" disabled={paso === 0 || guardando} onClick={() => irAPaso(paso - 1)}>
+                  Anterior
+                </button>
+                {paso < ULTIMO_PASO ? (
+                  <button type="button" className="btn-primary" onClick={() => irAPaso(paso + 1)}>
+                    Siguiente
+                  </button>
+                ) : (
+                  <button type="submit" className="btn-primary" disabled={guardando || Boolean(guardado)}>
+                    {guardando ? 'Guardando...' : 'Guardar y descargar PDF'}
+                  </button>
+                )}
+              </div>
             </div>
           </form>
+
+          {/* ───────── Advertencia: espacios en blanco ───────── */}
+          {aviso && (
+            <div className="modal-overlay" onClick={() => !guardando && setAviso(false)}>
+              <div className="modal-card modal-card-ancho" onClick={(e) => e.stopPropagation()}>
+                <div className="modal-card-cuerpo">
+                  <h3>Hay {totalFaltantes} espacios sin llenar</h3>
+                  <p className="rf-aviso-texto">
+                    Si descargas de todas formas, los espacios de texto quedarán con <strong>{SIN_TEXTO}</strong> y
+                    las opciones que no se eligieron quedarán marcadas con <strong>{SIN_SELECCION}</strong>.
+                  </p>
+                  {faltantes.map((lista: string[], i: number) => lista.length > 0 && (
+                    <div key={SECCIONES[i].titulo} className="rf-aviso-seccion">
+                      <div className="rf-aviso-cabecera">
+                        <strong>{i + 1}. {SECCIONES[i].titulo}</strong>
+                        <button type="button" className="rf-aviso-ir" onClick={() => { setAviso(false); irAPaso(i); }}>
+                          Ir a esta sección
+                        </button>
+                      </div>
+                      <ul>
+                        {lista.map((etiqueta: string) => <li key={etiqueta}>{etiqueta}</li>)}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+                <div className="modal-acciones">
+                  <button type="button" className="btn-secundario" disabled={guardando} onClick={() => setAviso(false)}>
+                    Volver a completar
+                  </button>
+                  <button type="button" className="btn-primary" disabled={guardando} onClick={descargarDeTodasFormas}>
+                    {guardando ? 'Guardando...' : 'Descargar de todas formas'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </FormProvider>
       </div>
     </div>

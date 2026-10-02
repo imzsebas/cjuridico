@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase'; // ajusta la ruta si tu cliente está en otro lugar
 import PanelTopbar from '@/components/PanelTopbar';
 import Paginacion, { POR_PAGINA } from '@/components/Paginacion';
+import { SeccionCaso, repartoDe, resumenCaso } from '@/lib/estructuraRecepcion';
 
 // Esta página va en una ruta de administrador, por ejemplo: app/asignacion/page.tsx
 // Requiere que en la tabla "recepciones" exista la columna "estudiante_asignado_nombre"
@@ -75,6 +76,15 @@ export default function AsignacionPage() {
   const [paginaModal, setPaginaModal] = useState(1);
   const [paginaDetalle, setPaginaDetalle] = useState(1);
 
+  // Columna "Reparto" (Sí / No) de la página actual, sacada de lo que marcó el monitor en el formulario
+  const [repartoPorId, setRepartoPorId] = useState<Record<string, 'Sí' | 'No' | null>>({});
+
+  // Modal grande con toda la información del caso (se abre al tocar una fila)
+  const [detalleCaso, setDetalleCaso] = useState<Registro | null>(null);
+  const [datosCaso, setDatosCaso] = useState<SeccionCaso[] | null>(null);
+  const [pdfCaso, setPdfCaso] = useState<string | null>(null);
+  const [errorCaso, setErrorCaso] = useState<string | null>(null);
+
   // Modal de edición rápida (asesoría N°, nombres, área)
   const [editando, setEditando] = useState<Registro | null>(null);
   const [formEditar, setFormEditar] = useState({ asesoria_no: '', nombres_apellidos: '', area_derecho: '' });
@@ -127,7 +137,17 @@ export default function AsignacionPage() {
         if (error.code === 'PGRST103' && pagina > 1) setPagina(pagina - 1);
         else setMensaje({ tipo: 'error', texto: error.message });
       } else {
-        setRegistros((data ?? []).map(aRegistro));
+        const filas = (data ?? []).map(aRegistro);
+        // Reparto de los casos de esta página (viene del JSON "detalles" de recepciones)
+        const { data: extra } = await supabase
+          .from('recepciones')
+          .select('id, detalles')
+          .in('id', filas.map((f) => f.id));
+        if (cancelado) return;
+        const reparto: Record<string, 'Sí' | 'No' | null> = {};
+        (extra ?? []).forEach((e: { id: string; detalles: unknown }) => { reparto[e.id] = repartoDe(e.detalles); });
+        setRepartoPorId(reparto);
+        setRegistros(filas);
         setTotal(count ?? 0);
       }
       setCargando(false);
@@ -164,6 +184,27 @@ export default function AsignacionPage() {
     cargarCasos();
     return () => { cancelado = true; };
   }, [asignando, casosAsignados]);
+
+  // Información completa del caso: se pide solo cuando se abre el modal de detalle
+  useEffect(() => {
+    if (!detalleCaso) return;
+    let cancelado = false;
+    async function cargarCaso(id: string) {
+      setDatosCaso(null);
+      setPdfCaso(null);
+      setErrorCaso(null);
+      const { data, error } = await supabase.from('recepciones').select('*').eq('id', id).single();
+      if (cancelado) return;
+      if (error || !data) {
+        setErrorCaso(error?.message ?? 'No se encontró el caso.');
+        return;
+      }
+      setDatosCaso(resumenCaso(data));
+      setPdfCaso(typeof data.pdf_url === 'string' ? data.pdf_url : null);
+    }
+    cargarCaso(detalleCaso.id);
+    return () => { cancelado = true; };
+  }, [detalleCaso]);
 
   function normalizar(s: string) {
     return s.trim().toLowerCase();
@@ -309,7 +350,7 @@ export default function AsignacionPage() {
       <div className="admin-estado-vacio">Todavía no hay recepciones guardadas.</div>
     ) : (
       <div className="admin-table-card" style={{ opacity: cargando ? 0.6 : 1 }}>
-        <table className="admin-table">
+        <table className="admin-table admin-table-compacta">
           <thead>
             <tr>
               <th>N° de asesoría</th>
@@ -317,33 +358,98 @@ export default function AsignacionPage() {
               <th>Área de derecho</th>
               <th>Estudiante que recepciona</th>
               <th>Estudiante asignado</th>
-              <th>Acciones</th>
+              <th>Reparto</th>
             </tr>
           </thead>
           <tbody>
-            {registros.map((r) => (
-              <tr key={r.id}>
-                <td className={!r.asesoria_no ? 'sin-dato' : ''}>{r.asesoria_no || 'Sin asignar'}</td>
-                <td>{r.nombres_apellidos || '—'}</td>
-                <td>{r.area_derecho || '—'}</td>
-                <td>{r.estudiante_recepciona_nombre || '—'}</td>
-                <td className={!r.nombre_estudiante ? 'sin-dato' : ''}>
-                  {r.nombre_estudiante || 'Sin asignar'}
-                </td>
-                <td>
-                  <div className="admin-acciones">
-                    <button className="btn-chip" onClick={() => abrirEditar(r)}>Editar</button>
-                    <button className="btn-chip" onClick={() => abrirAsignar(r)}>Asignar</button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+            {registros.map((r) => {
+              const reparto = repartoPorId[r.id] ?? null;
+              return (
+                <tr
+                  key={r.id}
+                  className="fila-clic"
+                  tabIndex={0}
+                  onClick={() => setDetalleCaso(r)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') setDetalleCaso(r); }}
+                >
+                  <td className={!r.asesoria_no ? 'sin-dato' : ''}>{r.asesoria_no || 'Sin asignar'}</td>
+                  <td>{r.nombres_apellidos || '—'}</td>
+                  <td>{r.area_derecho || '—'}</td>
+                  <td>{r.estudiante_recepciona_nombre || '—'}</td>
+                  <td className={!r.nombre_estudiante ? 'sin-dato' : ''}>
+                    {r.nombre_estudiante || 'Sin asignar'}
+                  </td>
+                  <td>
+                    {reparto ? (
+                      <span className={`badge-reparto ${reparto === 'Sí' ? 'si' : 'no'}`}>{reparto}</span>
+                    ) : '—'}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
     )}
 
     <Paginacion pagina={pagina} total={total} onCambiar={setPagina} />
+
+    {/* Modal grande: toda la información del caso (aquí están Editar y Asignar) */}
+    {detalleCaso && (
+      <div className="modal-overlay" onClick={() => setDetalleCaso(null)}>
+        <div className="modal-card modal-card-grande" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-card-cuerpo">
+            <div className="caso-encabezado">
+              <h3>Asesoría N° {detalleCaso.asesoria_no || 'sin número'}</h3>
+              {pdfCaso && (
+                <a className="caso-pdf" href={pdfCaso} target="_blank" rel="noreferrer">Ver PDF</a>
+              )}
+            </div>
+            <div className="caso-resumen">
+              <div><span>Usuario</span><strong>{detalleCaso.nombres_apellidos || '—'}</strong></div>
+              <div><span>Estudiante asignado</span><strong>{detalleCaso.nombre_estudiante || 'Sin asignar'}</strong></div>
+              <div><span>Reparto</span><strong>{repartoPorId[detalleCaso.id] ?? '—'}</strong></div>
+            </div>
+
+            {errorCaso ? (
+              <div className="form-message error">{errorCaso}</div>
+            ) : datosCaso === null ? (
+              <p className="admin-estado-cargando" style={{ margin: 0 }}>Cargando información del caso...</p>
+            ) : (
+              datosCaso.map((sec, i) => (
+                <section key={sec.titulo} className="caso-seccion">
+                  <h4 className="caso-seccion-titulo">{i + 1}. {sec.titulo}</h4>
+                  <div className="caso-datos">
+                    {sec.datos.map((d) => (
+                      <div key={d.label} className={`caso-dato${d.largo ? ' largo' : ''}`}>
+                        <span>{d.label}</span>
+                        <p>{d.valor}</p>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              ))
+            )}
+          </div>
+
+          <div className="modal-acciones">
+            <button className="btn-secundario" onClick={() => setDetalleCaso(null)}>Cerrar</button>
+            <button
+              className="btn-secundario"
+              onClick={() => { const r = detalleCaso; setDetalleCaso(null); abrirEditar(r); }}
+            >
+              Editar
+            </button>
+            <button
+              className="btn-primary"
+              onClick={() => { const r = detalleCaso; setDetalleCaso(null); abrirAsignar(r); }}
+            >
+              Asignar
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
 
     {/* Modal: edición rápida */}
     {editando && (
