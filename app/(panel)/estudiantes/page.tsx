@@ -1,8 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase'; // ajusta la ruta si tu cliente está en otro lugar
+import PanelTopbar from '@/components/PanelTopbar';
+import Paginacion, { POR_PAGINA } from '@/components/Paginacion';
 
 const NIVELES = ['DERECHO PUBLICO', 'DERECHO PRIVADO', 'DERECHO LABORAL', 'DERECHO PENAL'] as const;
 
@@ -46,24 +48,49 @@ export default function EstudiantesPage() {
     return () => { cancelado = true; };
   }, [router]);
 
-  async function cargar() {
-    setCargando(true);
-    const { data, error } = await supabase.from('estudiantes').select('*').order('nombre_estudiante');
-    if (error) setError(error.message);
-    else setEstudiantes(data ?? []);
-    setCargando(false);
-  }
+  // --- Paginación: se pide a la base de datos solo la página actual (15 registros) ---
+  const [pagina, setPagina] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [recarga, setRecarga] = useState(0);
+  const [busquedaAplicada, setBusquedaAplicada] = useState('');
 
-  useEffect(() => { cargar(); }, []);
+  // La búsqueda espera un instante después de escribir, para no consultar en cada tecla
+  useEffect(() => {
+    const espera = setTimeout(() => {
+      setBusquedaAplicada(busqueda.trim());
+      setPagina(1);
+    }, 300);
+    return () => clearTimeout(espera);
+  }, [busqueda]);
 
-  const estudiantesFiltrados = useMemo(() => {
-    const termino = busqueda.trim().toLowerCase();
-    return estudiantes.filter((e) => {
-      const coincideNombre = termino === '' || e.nombre_estudiante.toLowerCase().includes(termino);
-      const coincideNivel = filtroNivel === 'TODOS' || e.nivel_consultorio === filtroNivel;
-      return coincideNombre && coincideNivel;
-    });
-  }, [estudiantes, busqueda, filtroNivel]);
+  useEffect(() => {
+    let cancelado = false;
+    async function cargar() {
+      setCargando(true);
+      const desde = (pagina - 1) * POR_PAGINA;
+      let consulta = supabase.from('estudiantes').select('*', { count: 'exact' });
+      if (busquedaAplicada) {
+        consulta = consulta.ilike('nombre_estudiante', `%${busquedaAplicada.replace(/[\\%_]/g, '\\$&')}%`);
+      }
+      if (filtroNivel !== 'TODOS') consulta = consulta.eq('nivel_consultorio', filtroNivel);
+      const { data, error, count } = await consulta
+        .order('nombre_estudiante')
+        .order('id')
+        .range(desde, desde + POR_PAGINA - 1);
+      if (cancelado) return;
+      if (error) {
+        // Si la página quedó vacía (p. ej. al eliminar el último registro de la última página), retrocede una
+        if (error.code === 'PGRST103' && pagina > 1) setPagina(pagina - 1);
+        else setError(error.message);
+      } else {
+        setEstudiantes(data ?? []);
+        setTotal(count ?? 0);
+      }
+      setCargando(false);
+    }
+    cargar();
+    return () => { cancelado = true; };
+  }, [pagina, busquedaAplicada, filtroNivel, recarga]);
 
   async function guardar() {
     if (!modal) return;
@@ -76,31 +103,31 @@ export default function EstudiantesPage() {
     setGuardando(false);
     if (error) { setError(error.message); return; }
     setModal(null);
-    cargar();
+    setRecarga((n) => n + 1);
   }
 
   async function eliminar(id: string) {
     if (!confirm('¿Eliminar este estudiante del directorio?')) return;
     const { error } = await supabase.from('estudiantes').delete().eq('id', id);
     if (error) setError(error.message);
-    else cargar();
+    else setRecarga((n) => n + 1);
   }
 
   return (
     <>
-    <div className="admin-page">
-      <div className="admin-header">
-        <h2>Estudiantes</h2>
-        <p>Directorio de estudiantes del consultorio.</p>
-      </div>
-
+    <div className="cp-wrap">
+      <PanelTopbar
+        title="Estudiantes"
+        subtitle={`${total} estudiantes · Directorio del consultorio`}
+        action={
+          <button className="cp-add-btn" onClick={() => setModal({ id: null, datos: { ...VACIO } })}>
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v12M1 7h12" stroke="#fff" strokeWidth="2" strokeLinecap="round" /></svg>
+            Nuevo estudiante
+          </button>
+        }
+      />
+      <div className="cp-content">
       {error && <div className="form-message error" style={{ maxWidth: 1600, margin: '0 auto 16px' }}>{error}</div>}
-
-      <div style={{ maxWidth: 1600, margin: '0 auto 16px' }}>
-        <button className="btn-chip" onClick={() => setModal({ id: null, datos: { ...VACIO } })}>
-          + Nuevo estudiante
-        </button>
-      </div>
 
       <div className="admin-toolbar">
         <input
@@ -113,28 +140,29 @@ export default function EstudiantesPage() {
         <select
           className="admin-select-filtro"
           value={filtroNivel}
-          onChange={(e) => setFiltroNivel(e.target.value)}
+          onChange={(e) => { setFiltroNivel(e.target.value); setPagina(1); }}
         >
           <option value="TODOS">Todos los niveles</option>
           {NIVELES.map((n) => <option key={n} value={n}>{n}</option>)}
         </select>
         {!cargando && (
           <span className="admin-contador">
-            {estudiantesFiltrados.length} de {estudiantes.length} estudiantes
+            {total} {total === 1 ? 'estudiante' : 'estudiantes'}
           </span>
         )}
       </div>
 
-      {cargando && <p className="admin-estado-cargando">Cargando...</p>}
-      {!cargando && estudiantes.length === 0 && (
-        <p className="admin-estado-vacio">Todavía no hay estudiantes registrados.</p>
-      )}
-      {!cargando && estudiantes.length > 0 && estudiantesFiltrados.length === 0 && (
-        <p className="admin-estado-vacio">No se encontraron estudiantes con ese criterio.</p>
+      {cargando && estudiantes.length === 0 && <p className="admin-estado-cargando">Cargando...</p>}
+      {!cargando && total === 0 && (
+        <p className="admin-estado-vacio">
+          {busquedaAplicada || filtroNivel !== 'TODOS'
+            ? 'No se encontraron estudiantes con ese criterio.'
+            : 'Todavía no hay estudiantes registrados.'}
+        </p>
       )}
 
-      {!cargando && estudiantesFiltrados.length > 0 && (
-        <div className="admin-table-card">
+      {total > 0 && estudiantes.length > 0 && (
+        <div className="admin-table-card" style={{ opacity: cargando ? 0.6 : 1 }}>
           <table className="admin-table">
             <thead>
               <tr>
@@ -147,7 +175,7 @@ export default function EstudiantesPage() {
               </tr>
             </thead>
             <tbody>
-              {estudiantesFiltrados.map((e) => (
+              {estudiantes.map((e) => (
                 <tr key={e.id}>
                   <td>{e.nombre_estudiante}</td>
                   <td>{e.codigo_estudiante}</td>
@@ -180,6 +208,9 @@ export default function EstudiantesPage() {
           </table>
         </div>
       )}
+
+      <Paginacion pagina={pagina} total={total} onCambiar={setPagina} />
+      </div>
     </div>
 
     {modal && (

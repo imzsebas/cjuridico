@@ -3,12 +3,9 @@
 import { useEffect, useState, Fragment } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase'; // ajusta la ruta si tu cliente está en otro lugar
-import PanelTopbar from '@/components/PanelTopbar';
-import Paginacion, { POR_PAGINA } from '@/components/Paginacion';
-import { descargarArchivo, generarPdfRecepcion, valoresDesdeFila } from '@/lib/formatoRecepcion';
+import ExcelJS from 'exceljs';
 
 type Registro = {
-  id_recepcion: string | null;
   asesoria_no: string | null;
   fecha: string | null;
   nombres_apellidos: string | null;
@@ -39,36 +36,51 @@ function parsearFecha(fecha: string | null): { anio: number; periodo: 'I' | 'II'
 
 const dato = (v: string | null) => v || <span className="sin-dato">—</span>;
 
-export default function LibroAsesoriasPage() {
+// Convierte a mayúsculas de forma segura (respeta null/undefined)
+const mayus = (v: string | null | undefined) => (v ?? '').toString().toUpperCase();
+
+// Encabezados exactos solicitados para el libro exportado, con su ancho de columna
+const COLUMNAS_EXPORTACION: { encabezado: string; ancho: number }[] = [
+  { encabezado: 'NUMERO DE ASESORIA', ancho: 16 },
+  { encabezado: 'NOMBRE DEL USUARIO', ancho: 28 },
+  { encabezado: 'FECHA DE LA ATENCION', ancho: 16 },
+  { encabezado: 'NUMERO DE CEDULA', ancho: 16 },
+  { encabezado: 'AREA', ancho: 18 },
+  { encabezado: 'DIRECCION', ancho: 28 },
+  { encabezado: 'CORREO ELECTRONICO', ancho: 26 },
+  { encabezado: 'TELEFONO', ancho: 15 },
+  { encabezado: 'MONITOR ENCARGADO', ancho: 26 },
+  { encabezado: 'ASUNTO', ancho: 32 },
+  { encabezado: 'FECHA DEL REPARTO', ancho: 16 },
+  { encabezado: 'ESTUDIANTE ASIGNADO', ancho: 26 },
+  { encabezado: 'CÓDIGO', ancho: 14 },
+];
+
+function registroAFila(r: Registro) {
+  return [
+    mayus(r.asesoria_no),
+    mayus(r.nombres_apellidos),
+    mayus(r.fecha),
+    mayus(r.cedula_numero),
+    mayus(r.area_derecho),
+    mayus(r.direccion),
+    mayus(r.correo),
+    mayus(r.contacto_1),
+    mayus(r.estudiante_recepciona_nombre),
+    mayus(r.naturaleza_asunto),
+    mayus(r.fecha_asignacion),
+    mayus(r.nombre_estudiante),
+    mayus(r.codigo_estudiante),
+  ];
+}
+
+export default function MisRecepcionesPage() {
   const router = useRouter();
   const [registros, setRegistros] = useState<Registro[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [generando, setGenerando] = useState<string | null>(null);
+  const [exportando, setExportando] = useState(false);
 
-  // Vuelve a llenar el formato PDF con los datos que hay hoy en la base de datos
-  async function descargarFormato(r: Registro) {
-    if (!r.id_recepcion) return;
-    setGenerando(r.id_recepcion);
-    setError(null);
-    try {
-      const { data, error } = await supabase.from('recepciones').select('*').eq('id', r.id_recepcion).single();
-      if (error) throw error;
-      const bytes = await generarPdfRecepcion(valoresDesdeFila(data));
-      descargarArchivo(bytes, `formato-recepcion-${r.asesoria_no ?? 'sin-numero'}.pdf`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : typeof e === 'object' && e && 'message' in e ? String((e as { message: unknown }).message) : 'No se pudo generar el formato.');
-    } finally {
-      setGenerando(null);
-    }
-  }
-
-  // Paginación: se pide a la base de datos solo la página actual (15 asesorías)
-  const [pagina, setPagina] = useState(1);
-  const [total, setTotal] = useState(0);
-
-  // Controla qué filas tienen el detalle abierto. La clave combina el grupo
-  // (año-periodo) con el número de asesoría, para que sea única en toda la página.
   const [expandidos, setExpandidos] = useState<Set<string>>(new Set());
 
   function alternarDetalle(id: string) {
@@ -79,43 +91,48 @@ export default function LibroAsesoriasPage() {
     });
   }
 
-  // Solo administradores
+  // Solo monitores entran aquí; el administrador tiene su propio Libro de Asesorías
   useEffect(() => {
     let cancelado = false;
-    async function verificarPermiso() {
+
+    async function verificarYCargar() {
       const { data: { session } } = await supabase.auth.getSession();
       const user = session?.user;
       if (!user) { if (!cancelado) router.replace('/login'); return; }
+
       const { data: perfil } = await supabase.from('usuarios').select('rol').eq('id', user.id).single();
       if (cancelado) return;
-      if (perfil?.rol !== 'administrador') router.replace('/login');
-    }
-    verificarPermiso();
-    return () => { cancelado = true; };
-  }, [router]);
+      if (perfil?.rol === 'administrador') { router.replace('/libro-asesorias'); return; }
+      if (perfil?.rol !== 'monitor') { router.replace('/login'); return; }
 
-  useEffect(() => {
-    let cancelado = false;
-    async function cargar() {
-      setCargando(true);
-      const desde = (pagina - 1) * POR_PAGINA;
-      const { data, error, count } = await supabase
+      // 1. ¿Cuáles recepciones son suyas?
+      const { data: propias, error: errorPropias } = await supabase
+        .from('recepciones')
+        .select('id')
+        .eq('monitor_id', user.id);
+
+      if (cancelado) return;
+      if (errorPropias) { setError(errorPropias.message); setCargando(false); return; }
+
+      const ids = (propias ?? []).map((r) => r.id);
+      if (ids.length === 0) { setRegistros([]); setCargando(false); return; }
+
+      // 2. Traer esas recepciones desde la vista, con la info de asignación ya incluida
+      const { data, error } = await supabase
         .from('libro_asesorias')
-        .select('*', { count: 'exact' })
-        .order('asesoria_no', { ascending: false })
-        .order('id_recepcion')
-        .range(desde, desde + POR_PAGINA - 1);
+        .select('*')
+        .in('id_recepcion', ids)
+        .order('asesoria_no', { ascending: false });
+
       if (cancelado) return;
       if (error) setError(error.message);
-      else {
-        setRegistros(data ?? []);
-        setTotal(count ?? 0);
-      }
+      else setRegistros(data ?? []);
       setCargando(false);
     }
-    cargar();
+
+    verificarYCargar();
     return () => { cancelado = true; };
-  }, [pagina]);
+  }, [router]);
 
   // Agrupar por año -> periodo (los sin fecha válida quedan aparte)
   const grupos = new Map<number, Map<'I' | 'II', Registro[]>>();
@@ -132,10 +149,76 @@ export default function LibroAsesoriasPage() {
 
   const anios = [...grupos.keys()].sort((a, b) => b - a);
 
-  // Solo 5 columnas esenciales quedan siempre visibles. El resto (documento,
-  // dirección, teléfono, correo, monitor, asunto, fecha de reparto, código)
-  // se movió a un detalle expandible por fila: así se acaba el scroll
-  // horizontal para lo que la mayoría de personas necesita ver a diario.
+  async function exportarLibro() {
+    if (registros.length === 0) return;
+    setExportando(true);
+    try {
+      const libro = new ExcelJS.Workbook();
+      libro.creator = 'Consultorio Jurídico';
+      libro.created = new Date();
+
+      const hoja = libro.addWorksheet('MIS RECEPCIONES', {
+        views: [{ state: 'frozen', ySplit: 1 }],
+      });
+
+      hoja.columns = COLUMNAS_EXPORTACION.map((c) => ({ width: c.ancho }));
+
+      const filaTitulo = hoja.addRow(COLUMNAS_EXPORTACION.map((c) => c.encabezado));
+      filaTitulo.eachCell((celda) => {
+        celda.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF123524' } };
+        celda.font = { color: { argb: 'FFFFFFFF' }, bold: true, size: 11 };
+        celda.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        celda.border = {
+          top: { style: 'thin', color: { argb: 'FF0D2A1C' } },
+          bottom: { style: 'thin', color: { argb: 'FF0D2A1C' } },
+          left: { style: 'thin', color: { argb: 'FF0D2A1C' } },
+          right: { style: 'thin', color: { argb: 'FF0D2A1C' } },
+        };
+      });
+      filaTitulo.height = 24;
+
+      const filas: string[][] = [];
+      for (const anio of anios) {
+        const porPeriodo = grupos.get(anio)!;
+        const periodos = (['II', 'I'] as const).filter((p) => porPeriodo.has(p));
+        for (const periodo of periodos) {
+          for (const r of porPeriodo.get(periodo)!) {
+            filas.push(registroAFila(r));
+          }
+        }
+      }
+      for (const r of sinFecha) {
+        filas.push(registroAFila(r));
+      }
+
+      filas.forEach((valores, indice) => {
+        const fila = hoja.addRow(valores);
+        const esPar = indice % 2 === 1;
+        fila.eachCell((celda) => {
+          celda.alignment = { vertical: 'middle', wrapText: true };
+          celda.border = { bottom: { style: 'thin', color: { argb: 'FFE0E6E1' } } };
+          if (esPar) celda.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEF2EE' } };
+        });
+      });
+
+      const buffer = await libro.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const fechaArchivo = new Date().toISOString().slice(0, 10);
+      const url = URL.createObjectURL(blob);
+      const enlace = document.createElement('a');
+      enlace.href = url;
+      enlace.download = `MIS_RECEPCIONES_${fechaArchivo}.xlsx`;
+      document.body.appendChild(enlace);
+      enlace.click();
+      document.body.removeChild(enlace);
+      URL.revokeObjectURL(url);
+    } finally {
+      setExportando(false);
+    }
+  }
+
   function tabla(lista: Registro[], grupoKey: string) {
     return (
       <div className="admin-table-card" key={grupoKey}>
@@ -218,10 +301,6 @@ export default function LibroAsesoriasPage() {
                             <dd>{dato(r.correo)}</dd>
                           </div>
                           <div>
-                            <dt>Monitor encargado</dt>
-                            <dd>{dato(r.estudiante_recepciona_nombre)}</dd>
-                          </div>
-                          <div>
                             <dt>Asunto</dt>
                             <dd>{dato(r.naturaleza_asunto)}</dd>
                           </div>
@@ -234,16 +313,6 @@ export default function LibroAsesoriasPage() {
                             <dd>{dato(r.codigo_estudiante)}</dd>
                           </div>
                         </dl>
-                        <div className="detalle-acciones">
-                          <button
-                            type="button"
-                            className="btn-chip"
-                            onClick={() => descargarFormato(r)}
-                            disabled={!r.id_recepcion || generando === r.id_recepcion}
-                          >
-                            {generando === r.id_recepcion ? 'Generando formato...' : 'Descargar formato con los datos guardados'}
-                          </button>
-                        </div>
                       </td>
                     </tr>
                   )}
@@ -257,14 +326,34 @@ export default function LibroAsesoriasPage() {
   }
 
   return (
-    <div className="cp-wrap">
-      <PanelTopbar title="Libro de asesorías" subtitle="Historial completo de asesorías, organizado por año y periodo." />
-      <div className="cp-content">
+    <div className="admin-page">
+      <div className="admin-header">
+        <div className="admin-header-fila">
+          <div>
+            <h2>Mis recepciones</h2>
+            <p>Historial de las asesorías que tú recepcionaste, organizado por año y periodo.</p>
+          </div>
+          <button
+            type="button"
+            className="btn-exportar"
+            onClick={exportarLibro}
+            disabled={exportando || cargando || registros.length === 0}
+            title="Descargar tu historial en Excel"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 3v12" />
+              <polyline points="7 10 12 15 17 10" />
+              <path d="M4 19h16" />
+            </svg>
+            {exportando ? 'Exportando…' : 'Exportar'}
+          </button>
+        </div>
+      </div>
 
       {error && <div className="form-message error" style={{ maxWidth: 1600, margin: '0 auto 16px' }}>{error}</div>}
       {cargando && <p className="admin-estado-cargando">Cargando...</p>}
       {!cargando && registros.length === 0 && !error && (
-        <p className="admin-estado-vacio">Todavía no hay asesorías registradas.</p>
+        <p className="admin-estado-vacio">Todavía no has recepcionado ninguna asesoría.</p>
       )}
 
       {anios.map((anio) => {
@@ -291,9 +380,6 @@ export default function LibroAsesoriasPage() {
           {tabla(sinFecha, 'sin-fecha')}
         </div>
       )}
-
-      <Paginacion pagina={pagina} total={total} onCambiar={setPagina} />
-      </div>
     </div>
   );
 }

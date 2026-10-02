@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase'; // ajusta la ruta si tu cliente está en otro lugar
+import PanelTopbar from '@/components/PanelTopbar';
+import Paginacion, { POR_PAGINA } from '@/components/Paginacion';
 
 // Esta página va en una ruta de administrador, por ejemplo: app/asignacion/page.tsx
 // Requiere que en la tabla "recepciones" exista la columna "estudiante_asignado_nombre"
@@ -31,11 +33,47 @@ function adivinarNivel(area: string | null): string {
   return 'DERECHO PRIVADO';
 }
 
+const COLUMNAS = 'id_recepcion, asesoria_no, nombres_apellidos, area_derecho, estudiante_recepciona_nombre, nombre_estudiante';
+
+type FilaLibro = {
+  id_recepcion: string;
+  asesoria_no: string | null;
+  nombres_apellidos: string | null;
+  area_derecho: string | null;
+  estudiante_recepciona_nombre: string | null;
+  nombre_estudiante: string | null;
+};
+
+function aRegistro(r: FilaLibro): Registro {
+  return {
+    id: r.id_recepcion,
+    asesoria_no: r.asesoria_no,
+    nombres_apellidos: r.nombres_apellidos,
+    area_derecho: r.area_derecho,
+    estudiante_recepciona_nombre: r.estudiante_recepciona_nombre,
+    nombre_estudiante: r.nombre_estudiante,
+  };
+}
+
 export default function AsignacionPage() {
   const router = useRouter();
   const [registros, setRegistros] = useState<Registro[]>([]);
   const [cargando, setCargando] = useState(true);
   const [mensaje, setMensaje] = useState<{ tipo: 'error' | 'success'; texto: string } | null>(null);
+
+  // Paginación de la tabla principal (15 casos por página, pedidos a la base de datos)
+  const [autorizado, setAutorizado] = useState(false);
+  const [pagina, setPagina] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [recarga, setRecarga] = useState(0);
+
+  // Casos que ya tienen estudiante asignado (para contar y detallar por estudiante).
+  // Solo se cargan al abrir el modal de asignar, en bloques de 1000 para no toparse con el límite de la API.
+  const [casosAsignados, setCasosAsignados] = useState<Registro[] | null>(null);
+
+  // Páginas dentro de los modales (listas en memoria)
+  const [paginaModal, setPaginaModal] = useState(1);
+  const [paginaDetalle, setPaginaDetalle] = useState(1);
 
   // Modal de edición rápida (asesoría N°, nombres, área)
   const [editando, setEditando] = useState<Registro | null>(null);
@@ -64,36 +102,68 @@ export default function AsignacionPage() {
       const { data: perfil } = await supabase.from('usuarios').select('rol').eq('id', user.id).single();
       if (cancelado) return;
       if (!perfil || perfil.rol !== 'administrador') { router.replace('/recepcion'); return; }
-      cargarRegistros();
+      setAutorizado(true);
     }
     verificarPermiso();
     return () => { cancelado = true; };
   }, [router]);
 
-  async function cargarRegistros() {
-    setCargando(true);
-    setMensaje(null);
-    const { data, error } = await supabase
-      .from('libro_asesorias')
-      .select('id_recepcion, asesoria_no, nombres_apellidos, area_derecho, estudiante_recepciona_nombre, nombre_estudiante');
-
-    if (error) {
-      setMensaje({ tipo: 'error', texto: error.message });
-    } else {
-      setRegistros((data ?? []).map((r) => ({
-        id: r.id_recepcion,
-        asesoria_no: r.asesoria_no,
-        nombres_apellidos: r.nombres_apellidos,
-        area_derecho: r.area_derecho,
-        estudiante_recepciona_nombre: r.estudiante_recepciona_nombre,
-        nombre_estudiante: r.nombre_estudiante,
-      })));
+  // Tabla principal: solo la página actual
+  useEffect(() => {
+    if (!autorizado) return;
+    let cancelado = false;
+    async function cargarRegistros() {
+      setCargando(true);
+      setMensaje(null);
+      const desde = (pagina - 1) * POR_PAGINA;
+      const { data, error, count } = await supabase
+        .from('libro_asesorias')
+        .select(COLUMNAS, { count: 'exact' })
+        .order('asesoria_no', { ascending: false })
+        .order('id_recepcion')
+        .range(desde, desde + POR_PAGINA - 1);
+      if (cancelado) return;
+      if (error) {
+        if (error.code === 'PGRST103' && pagina > 1) setPagina(pagina - 1);
+        else setMensaje({ tipo: 'error', texto: error.message });
+      } else {
+        setRegistros((data ?? []).map(aRegistro));
+        setTotal(count ?? 0);
+      }
+      setCargando(false);
     }
-    setCargando(false);
-  }
+    cargarRegistros();
+    return () => { cancelado = true; };
+  }, [autorizado, pagina, recarga]);
 
-  // La columna "Estudiante asignado" solo aparece cuando ya hay al menos una asignación hecha
-  const hayAsignaciones = registros.some((r) => r.nombre_estudiante);
+  // Casos asignados (solo cuando se abre el modal de asignar)
+  useEffect(() => {
+    if (!asignando || casosAsignados !== null) return;
+    let cancelado = false;
+    async function cargarCasos() {
+      const TAM = 1000;
+      const todos: Registro[] = [];
+      for (let desde = 0; ; desde += TAM) {
+        const { data, error } = await supabase
+          .from('libro_asesorias')
+          .select(COLUMNAS)
+          .not('nombre_estudiante', 'is', null)
+          .order('id_recepcion')
+          .range(desde, desde + TAM - 1);
+        if (cancelado) return;
+        if (error) {
+          setMensaje({ tipo: 'error', texto: error.message });
+          setCasosAsignados([]);
+          return;
+        }
+        (data ?? []).forEach((r: FilaLibro) => todos.push(aRegistro(r)));
+        if ((data?.length ?? 0) < TAM) break;
+      }
+      setCasosAsignados(todos);
+    }
+    cargarCasos();
+    return () => { cancelado = true; };
+  }, [asignando, casosAsignados]);
 
   function normalizar(s: string) {
     return s.trim().toLowerCase();
@@ -103,7 +173,7 @@ export default function AsignacionPage() {
   // Soporta el caso de que "nombre_estudiante" traiga varios nombres separados por coma.
   const registrosPorEstudiante = useMemo(() => {
     const mapa = new Map<string, Registro[]>();
-    registros.forEach((r) => {
+    (casosAsignados ?? []).forEach((r) => {
       if (!r.nombre_estudiante) return;
       r.nombre_estudiante.split(',').forEach((nombre) => {
         const clave = normalizar(nombre);
@@ -113,7 +183,7 @@ export default function AsignacionPage() {
       });
     });
     return mapa;
-  }, [registros]);
+  }, [casosAsignados]);
 
   function casosDe(nombreEstudiante: string): Registro[] {
     return registrosPorEstudiante.get(normalizar(nombreEstudiante)) ?? [];
@@ -146,7 +216,8 @@ export default function AsignacionPage() {
       return;
     }
     setEditando(null);
-    cargarRegistros();
+    setCasosAsignados(null);
+    setRecarga((n) => n + 1);
   }
 
   function abrirAsignar(registro: Registro) {
@@ -154,10 +225,19 @@ export default function AsignacionPage() {
     setNivelAsignacion(adivinarNivel(registro.area_derecho));
     setSeleccionados(new Set());
     setBusquedaEstudiante('');
+    setPaginaModal(1);
   }
 
   const estudiantesFiltradosModal = estudiantesDisponibles.filter((e) =>
     e.nombre_estudiante.toLowerCase().includes(busquedaEstudiante.trim().toLowerCase())
+  );
+
+  // Lista del modal paginada de 15 en 15 (la selección se conserva al cambiar de página)
+  const paginasModal = Math.max(1, Math.ceil(estudiantesFiltradosModal.length / POR_PAGINA));
+  const paginaModalSegura = Math.min(paginaModal, paginasModal);
+  const estudiantesModalPagina = estudiantesFiltradosModal.slice(
+    (paginaModalSegura - 1) * POR_PAGINA,
+    paginaModalSegura * POR_PAGINA
   );
 
   // Cada vez que cambia el nivel elegido (al abrir el modal, o si el admin lo corrige),
@@ -204,24 +284,31 @@ export default function AsignacionPage() {
       return;
     }
     setAsignando(null);
-    cargarRegistros();
+    setCasosAsignados(null);
+    setRecarga((n) => n + 1);
   }
 
+  const casosDetalle = detalleEstudiante ? casosDe(detalleEstudiante.nombre_estudiante) : [];
+  const paginasDetalle = Math.max(1, Math.ceil(casosDetalle.length / POR_PAGINA));
+  const paginaDetalleSegura = Math.min(paginaDetalle, paginasDetalle);
+  const casosDetallePagina = casosDetalle.slice(
+    (paginaDetalleSegura - 1) * POR_PAGINA,
+    paginaDetalleSegura * POR_PAGINA
+  );
+
   return (
-    <div className="admin-page">
-      <div className="admin-header">
-        <h2>Recepción y asignación</h2>
-        <p>Casos recibidos, listos para asignar a un estudiante.</p>
-      </div>
+    <div className="cp-wrap">
+      <PanelTopbar title="Recepción y asignación" subtitle="Casos recibidos, listos para asignar a un estudiante." />
+      <div className="cp-content">
 
       {mensaje && <div className={`form-message ${mensaje.tipo}`} style={{ maxWidth: 1600, margin: '0 auto 16px' }}>{mensaje.texto}</div>}
 
-      {cargando ? (
+      {cargando && registros.length === 0 ? (
       <div className="admin-estado-cargando">Cargando registros...</div>
     ) : registros.length === 0 ? (
       <div className="admin-estado-vacio">Todavía no hay recepciones guardadas.</div>
     ) : (
-      <div className="admin-table-card">
+      <div className="admin-table-card" style={{ opacity: cargando ? 0.6 : 1 }}>
         <table className="admin-table">
           <thead>
             <tr>
@@ -229,7 +316,7 @@ export default function AsignacionPage() {
               <th>Usuario</th>
               <th>Área de derecho</th>
               <th>Estudiante que recepciona</th>
-              {hayAsignaciones && <th>Estudiante asignado</th>}
+              <th>Estudiante asignado</th>
               <th>Acciones</th>
             </tr>
           </thead>
@@ -240,11 +327,9 @@ export default function AsignacionPage() {
                 <td>{r.nombres_apellidos || '—'}</td>
                 <td>{r.area_derecho || '—'}</td>
                 <td>{r.estudiante_recepciona_nombre || '—'}</td>
-                {hayAsignaciones && (
-                  <td className={!r.nombre_estudiante ? 'sin-dato' : ''}>
-                    {r.nombre_estudiante || 'Sin asignar'}
-                  </td>
-                )}
+                <td className={!r.nombre_estudiante ? 'sin-dato' : ''}>
+                  {r.nombre_estudiante || 'Sin asignar'}
+                </td>
                 <td>
                   <div className="admin-acciones">
                     <button className="btn-chip" onClick={() => abrirEditar(r)}>Editar</button>
@@ -257,6 +342,8 @@ export default function AsignacionPage() {
         </table>
       </div>
     )}
+
+    <Paginacion pagina={pagina} total={total} onCambiar={setPagina} />
 
     {/* Modal: edición rápida */}
     {editando && (
@@ -322,7 +409,7 @@ export default function AsignacionPage() {
                 id="nivel_consultorio"
                 className="campo-select"
                 value={nivelAsignacion}
-                onChange={(e) => setNivelAsignacion(e.target.value)}
+                onChange={(e) => { setNivelAsignacion(e.target.value); setPaginaModal(1); }}
               >
                 {NIVELES.map((n) => <option key={n} value={n}>{n}</option>)}
               </select>
@@ -336,10 +423,10 @@ export default function AsignacionPage() {
                 className="busqueda-estudiantes"
                 placeholder="Buscar estudiante por nombre..."
                 value={busquedaEstudiante}
-                onChange={(e) => setBusquedaEstudiante(e.target.value)}
+                onChange={(e) => { setBusquedaEstudiante(e.target.value); setPaginaModal(1); }}
               />
 
-              {cargandoEstudiantes ? (
+              {cargandoEstudiantes || casosAsignados === null ? (
                 <p className="admin-estado-cargando" style={{ margin: 0 }}>Cargando estudiantes...</p>
               ) : estudiantesDisponibles.length === 0 ? (
                 <p className="admin-estado-vacio" style={{ margin: 0 }}>
@@ -350,8 +437,9 @@ export default function AsignacionPage() {
                   Ningún estudiante coincide con &quot;{busquedaEstudiante}&quot;.
                 </p>
               ) : (
+                <>
                 <div className="lista-estudiantes">
-                  {estudiantesFiltradosModal.map((e) => {
+                  {estudiantesModalPagina.map((e) => {
                     const casos = casosDe(e.nombre_estudiante);
                     const seleccionado = seleccionados.has(e.id);
                     return (
@@ -378,7 +466,7 @@ export default function AsignacionPage() {
                           className="btn-lupa"
                           disabled={casos.length === 0}
                           title={casos.length === 0 ? 'Sin asesorías asignadas todavía' : 'Ver casos asignados'}
-                          onClick={(ev) => { ev.stopPropagation(); setDetalleEstudiante(e); }}
+                          onClick={(ev) => { ev.stopPropagation(); setPaginaDetalle(1); setDetalleEstudiante(e); }}
                         >
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                             <circle cx="11" cy="11" r="7" />
@@ -389,6 +477,13 @@ export default function AsignacionPage() {
                     );
                   })}
                 </div>
+                <Paginacion
+                  compacto
+                  pagina={paginaModalSegura}
+                  total={estudiantesFiltradosModal.length}
+                  onCambiar={setPaginaModal}
+                />
+                </>
               )}
             </div>
           </div>
@@ -416,7 +511,7 @@ export default function AsignacionPage() {
             </p>
 
             <div style={{ maxHeight: 380, overflowY: 'auto' }}>
-              {casosDe(detalleEstudiante.nombre_estudiante).map((c) => (
+              {casosDetallePagina.map((c) => (
                 <div key={c.id} className="detalle-caso-item">
                   <div><strong>N° {c.asesoria_no || 'sin número'}</strong></div>
                   <div>{c.nombres_apellidos || '—'}</div>
@@ -424,6 +519,12 @@ export default function AsignacionPage() {
                 </div>
               ))}
             </div>
+            <Paginacion
+              compacto
+              pagina={paginaDetalleSegura}
+              total={casosDetalle.length}
+              onCambiar={setPaginaDetalle}
+            />
           </div>
 
           <div className="modal-acciones">
@@ -434,6 +535,7 @@ export default function AsignacionPage() {
         </div>
       </div>
     )}
+      </div>
     </div>
   );
 }
