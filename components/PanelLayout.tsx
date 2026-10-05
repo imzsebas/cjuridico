@@ -20,6 +20,9 @@ const ICONOS = {
   estudiantes: (
     <svg viewBox="0 0 18 18" fill="none" width="18" height="18"><circle cx="9" cy="7" r="3" stroke="currentColor" strokeWidth="1.5" /><path d="M3 16c0-2.761 2.686-5 6-5s6 2.239 6 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
   ),
+  historial: (
+    <svg viewBox="0 0 18 18" fill="none" width="18" height="18"><circle cx="9" cy="9" r="7" stroke="currentColor" strokeWidth="1.5" /><path d="M9 5v4l2.5 1.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+  ),
 };
 
 const ENLACES = [
@@ -27,6 +30,7 @@ const ENLACES = [
   { href: '/asignacion', label: 'Asignación', corto: 'Asignación', grupo: 'Gestión', icono: ICONOS.asignacion, roles: ['administrador'] },
   { href: '/libro-asesorias', label: 'Libro de asesorías', corto: 'Libro', grupo: 'Registros', icono: ICONOS.libro, roles: ['administrador'] },
   { href: '/estudiantes', label: 'Estudiantes', corto: 'Estudiantes', grupo: 'Registros', icono: ICONOS.estudiantes, roles: ['administrador'] },
+  { href: '/mis-recepciones', label: 'Mis recepciones', corto: 'Historial', grupo: 'Registros', icono: ICONOS.historial, roles: ['monitor'] },
 ];
 
 const ETIQUETA_ROL: Record<string, string> = { administrador: 'Administrador', monitor: 'Monitor' };

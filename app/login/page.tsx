@@ -1,9 +1,11 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase'; // ajusta esta ruta si tu cliente está en otro lugar
 
 export default function LoginPage() {
+  const router = useRouter();
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [correo, setCorreo] = useState('');
   const [password, setPassword] = useState('');
@@ -15,20 +17,31 @@ export default function LoginPage() {
     setLoading(true);
     setMessage(null);
 
-    const { error } =
-      mode === 'login'
-        ? await supabase.auth.signInWithPassword({ email: correo, password })
-        : await supabase.auth.signUp({ email: correo, password });
-
-    if (error) {
-      setMessage({ type: 'error', text: error.message });
-    } else if (mode === 'signup') {
-      setMessage({ type: 'success', text: 'Cuenta creada. Revisa tu correo para confirmarla.' });
-    } else {
-      window.location.href = '/recepcion'; // redirige tras iniciar sesión
+    if (mode === 'signup') {
+      const { error } = await supabase.auth.signUp({ email: correo, password });
+      if (error) setMessage({ type: 'error', text: error.message });
+      else setMessage({ type: 'success', text: 'Cuenta creada. Revisa tu correo para confirmarla.' });
+      setLoading(false);
+      return;
     }
 
-    setLoading(false);
+    const { data, error } = await supabase.auth.signInWithPassword({ email: correo, password });
+    if (error) {
+      setMessage({ type: 'error', text: error.message });
+      setLoading(false);
+      return;
+    }
+
+    // Cada rol entra a su pantalla de inicio. Si no se puede leer el rol, se va a /recepcion
+    // (lo que hacía antes), y cada página vuelve a validar el permiso por su cuenta.
+    let destino = '/recepcion';
+    const userId = data.user?.id;
+    if (userId) {
+      const { data: perfil } = await supabase.from('usuarios').select('rol').eq('id', userId).single();
+      if (perfil?.rol === 'administrador') destino = '/asignacion';
+    }
+    router.replace(destino);
+    // No se apaga "loading": el botón queda bloqueado mientras se carga la nueva pantalla.
   }
 
   return (

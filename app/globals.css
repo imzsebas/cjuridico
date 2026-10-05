@@ -861,6 +861,7 @@ body {
 .cp-topbar-sub { font-size: 12px; color: #5b6b62; margin-top: 1px; }
 .cp-add-btn { display: flex; align-items: center; gap: 6px; background: #1f5c42; color: #fff; border: none; border-radius: 9px; padding: 8px 16px; font-size: 13px; font-weight: 700; cursor: pointer; transition: opacity 0.2s; white-space: nowrap; }
 .cp-add-btn:hover { opacity: 0.88; }
+.cp-add-btn:disabled { opacity: 0.5; cursor: default; }
 .cp-content { flex: 1; min-height: 0; padding: 1.2rem 1.5rem; overflow-y: auto; }
 
 @media (max-width: 768px) {

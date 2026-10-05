@@ -3,6 +3,7 @@
 import { useEffect, useState, Fragment } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase'; // ajusta la ruta si tu cliente está en otro lugar
+import PanelTopbar from '@/components/PanelTopbar';
 import ExcelJS from 'exceljs';
 
 type Registro = {
@@ -86,7 +87,8 @@ export default function MisRecepcionesPage() {
   function alternarDetalle(id: string) {
     setExpandidos((prev) => {
       const nuevo = new Set(prev);
-      nuevo.has(id) ? nuevo.delete(id) : nuevo.add(id);
+      if (nuevo.has(id)) nuevo.delete(id);
+      else nuevo.add(id);
       return nuevo;
     });
   }
@@ -326,29 +328,28 @@ export default function MisRecepcionesPage() {
   }
 
   return (
-    <div className="admin-page">
-      <div className="admin-header">
-        <div className="admin-header-fila">
-          <div>
-            <h2>Mis recepciones</h2>
-            <p>Historial de las asesorías que tú recepcionaste, organizado por año y periodo.</p>
-          </div>
+    <div className="cp-wrap">
+      <PanelTopbar
+        title="Mis recepciones"
+        subtitle="Historial de las asesorías que tú recepcionaste, organizado por año y periodo."
+        action={
           <button
             type="button"
-            className="btn-exportar"
+            className="cp-add-btn"
             onClick={exportarLibro}
             disabled={exportando || cargando || registros.length === 0}
             title="Descargar tu historial en Excel"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 3v12" />
               <polyline points="7 10 12 15 17 10" />
               <path d="M4 19h16" />
             </svg>
             {exportando ? 'Exportando…' : 'Exportar'}
           </button>
-        </div>
-      </div>
+        }
+      />
+      <div className="cp-content">
 
       {error && <div className="form-message error" style={{ maxWidth: 1600, margin: '0 auto 16px' }}>{error}</div>}
       {cargando && <p className="admin-estado-cargando">Cargando...</p>}
@@ -380,6 +381,7 @@ export default function MisRecepcionesPage() {
           {tabla(sinFecha, 'sin-fecha')}
         </div>
       )}
+      </div>
     </div>
   );
 }
