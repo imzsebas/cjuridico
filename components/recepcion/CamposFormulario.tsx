@@ -6,7 +6,7 @@
 import {
   Casilla, Fila, GrupoUnico, Lista, Seccion, SiNo, Texto, useFormulario,
 } from '@/components/recepcion/Controles';
-import { LINEAS_HECHO, Medidor, partirEnLineas } from '@/lib/formatoRecepcion';
+import { LINEAS_HECHO, Medidor, Valores, partirEnLineas } from '@/lib/formatoRecepcion';
 import {
   AREAS_DERECHO, ASESORIA_REPARTO, COMO_NOS_CONOCIO, DISCAPACIDADES, DOCUMENTOS, ESCOLARIDAD,
   ESTADO_CIVIL, HECHOS, OCUPACION, POBLACION, SECCIONES, TIPO_IDENTIFICACION,
@@ -22,7 +22,7 @@ const deInputFecha = (iso: string) => {
 };
 
 // Un hecho de la síntesis: cuadro de texto + aviso si no cabe en el espacio del formato
-function Hecho({ n, medidor }: { n: number; medidor: Medidor | null }) {
+function Hecho({ n, medidor, obligatorio = false }: { n: number; medidor: Medidor | null; obligatorio?: boolean }) {
   const { valores, set } = useFormulario();
   const k = `sintesis_hecho_${n}`;
   const texto = valores[k] ?? '';
@@ -30,7 +30,7 @@ function Hecho({ n, medidor }: { n: number; medidor: Medidor | null }) {
   const { lineas, desborde } = medidor ? partirEnLineas(texto.toUpperCase(), medidor) : { lineas: [], desborde: false };
   return (
     <div className="rf-campo rf-hecho">
-      <label htmlFor={`rf-${k}`}>Hecho {n}</label>
+      <label htmlFor={`rf-${k}`}>Hecho {n}{obligatorio ? ' *' : ''}</label>
       <textarea
         id={`rf-${k}`}
         rows={3}
@@ -48,12 +48,60 @@ function Hecho({ n, medidor }: { n: number; medidor: Medidor | null }) {
   );
 }
 
+// Estado civil + unión marital de hecho (UMH):
+// - Soltero(a): se muestra la pregunta de UMH para que la responda.
+// - Casado(a): la pregunta no se muestra y UMH queda marcada como NO automáticamente.
+// Al cambiar de casado(a) a otra opción, la respuesta automática se borra para que no parezca una respuesta del usuario.
+function EstadoCivilYUnion() {
+  const { valores, setVarios } = useFormulario();
+  const casado = Boolean(valores.estado_civil_casado);
+  const soltero = Boolean(valores.estado_civil_soltero);
+
+  function alternar(k: string) {
+    const cambios: Valores = {};
+    ESTADO_CIVIL.forEach((o) => { cambios[o.k] = ''; });
+    const activando = !valores[k];
+    if (activando) cambios[k] = 'X';
+    if (k === 'estado_civil_casado') {
+      cambios.umh_si = '';
+      cambios.umh_no = activando ? 'X' : '';
+    } else if (casado) {
+      cambios.umh_si = '';
+      cambios.umh_no = '';
+    }
+    setVarios(cambios);
+  }
+
+  return (
+    <>
+      <div className="rf-grupo">
+        <div className="rf-grupo-titulo">Estado civil</div>
+        <div className="rf-opciones">
+          {ESTADO_CIVIL.map((o) => {
+            const marcada = Boolean(valores[o.k]);
+            return (
+              <label key={o.k} className={`rf-opcion${marcada ? ' marcada' : ''}`}>
+                <input type="checkbox" checked={marcada} onChange={() => alternar(o.k)} />
+                <span>{o.label}</span>
+              </label>
+            );
+          })}
+        </div>
+      </div>
+      {soltero && <SiNo titulo="Unión marital de hecho" kSi="umh_si" kNo="umh_no" />}
+      {casado && <p className="rf-ayuda">Unión marital de hecho: NO (se marca automáticamente porque el usuario está casado).</p>}
+    </>
+  );
+}
+
 export default function CamposSeccion({
   paso,
   medidor,
+  obligatorios = false,
 }: {
   paso: number; // 0 a 5
   medidor: Medidor | null;
+  obligatorios?: boolean; // true en la pantalla de Recepción: muestra el * en los campos que no se pueden dejar vacíos
 }) {
   const { valores, set } = useFormulario();
   return (
@@ -162,8 +210,7 @@ export default function CamposSeccion({
     {/* ───────── 4. Información personal ───────── */}
     {paso === 3 && (
       <Seccion titulo={`4. ${SECCIONES[3].titulo}`}>
-        <GrupoUnico titulo="Estado civil" opciones={ESTADO_CIVIL} />
-        <SiNo titulo="Unión marital de hecho" kSi="umh_si" kNo="umh_no" />
+        <EstadoCivilYUnion />
         <Fila>
           <Texto k="personas_a_cargo" label="N.º personas a cargo" tipo="number" inputMode="numeric" />
         </Fila>
@@ -198,7 +245,7 @@ export default function CamposSeccion({
             Escuche de manera atenta el relato y luego elabore un resumen claro, preciso y detallado en letra legible.
           </p>
           <div className="rf-hechos">
-            {HECHOS.map((n) => <Hecho key={n} n={n} medidor={medidor} />)}
+            {HECHOS.map((n) => <Hecho key={n} n={n} medidor={medidor} obligatorio={obligatorios && n === 1} />)}
           </div>
         </div>
 
@@ -210,11 +257,11 @@ export default function CamposSeccion({
         </div>
 
         <Fila>
-          <Lista k="area_derecho" label="Área de derecho" opciones={AREAS_DERECHO} />
-          <Texto k="naturaleza_asunto" label="Naturaleza del asunto" />
+          <Lista k="area_derecho" label={`Área de derecho${obligatorios ? ' *' : ''}`} opciones={AREAS_DERECHO} />
+          <Texto k="naturaleza_asunto" label={`Naturaleza del asunto${obligatorios ? ' *' : ''}`} />
         </Fila>
 
-        <GrupoUnico titulo="Asesoría" opciones={ASESORIA_REPARTO} />
+        <GrupoUnico titulo={`Asesoría (con o sin reparto)${obligatorios ? ' *' : ''}`} opciones={ASESORIA_REPARTO} />
       </Seccion>
     )}
     </>

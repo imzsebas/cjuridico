@@ -82,13 +82,22 @@ export default function RecepcionPage() {
   function solicitarGuardado() {
     setMensaje(null);
 
-    const obligatorios: { k: string; texto: string; paso: number }[] = [
-      { k: 'nombres_apellidos', texto: 'el nombre del usuario (sección 1)', paso: 0 },
-      { k: 'estudiante_recepciona_nombre', texto: 'el nombre del estudiante que recepciona (sección 6)', paso: ULTIMO_PASO },
+    // Obligatorios: nombre del usuario, estudiante que recepciona, hecho 1, área de derecho,
+    // naturaleza del asunto y reparto (con o sin). `lleno` dice si el campo ya está diligenciado.
+    const lleno = (k: string) => Boolean(valores[k]?.trim());
+    const obligatorios: { ok: boolean; texto: string; paso: number }[] = [
+      { ok: lleno('nombres_apellidos'), texto: 'el nombre del usuario (sección 1)', paso: 0 },
+      { ok: lleno('estudiante_recepciona_nombre'), texto: 'el nombre del estudiante que recepciona (sección 6)', paso: ULTIMO_PASO },
+      { ok: lleno('sintesis_hecho_1'), texto: 'el hecho 1 (sección 6)', paso: ULTIMO_PASO },
+      { ok: lleno('area_derecho'), texto: 'el área de derecho (sección 6)', paso: ULTIMO_PASO },
+      { ok: lleno('naturaleza_asunto'), texto: 'la naturaleza del asunto (sección 6)', paso: ULTIMO_PASO },
+      { ok: lleno('asesoria_con_reparto') || lleno('asesoria_sin_reparto'), texto: 'si la asesoría es con o sin reparto (sección 6)', paso: ULTIMO_PASO },
     ];
-    const sinLlenar = obligatorios.filter((o) => !valores[o.k]?.trim());
+    const sinLlenar = obligatorios.filter((o) => !o.ok);
     if (sinLlenar.length) {
-      setMensaje({ tipo: 'error', texto: `Falta completar ${sinLlenar.map((o) => o.texto).join(' y ')}.` });
+      const textos = sinLlenar.map((o) => o.texto);
+      const lista = textos.length > 1 ? `${textos.slice(0, -1).join(', ')} y ${textos[textos.length - 1]}` : textos[0];
+      setMensaje({ tipo: 'error', texto: `Falta completar ${lista}.` });
       irAPaso(sinLlenar[0].paso);
       return;
     }
@@ -245,7 +254,7 @@ export default function RecepcionPage() {
             </nav>
             <div className="rf-progreso">Sección {paso + 1} de {SECCIONES.length}</div>
 
-            <CamposSeccion paso={paso} medidor={medidor} />
+            <CamposSeccion paso={paso} medidor={medidor} obligatorios />
 
             {/* ───────── Barra de navegación ───────── */}
             <div className="rf-barra">

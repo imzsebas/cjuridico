@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase'; // ajusta la ruta si tu cliente está en otro lugar
 import PanelTopbar from '@/components/PanelTopbar';
+import ExcelJS from 'exceljs';
 import Paginacion, { POR_PAGINA } from '@/components/Paginacion';
 import { FormProvider } from '@/components/recepcion/Controles';
 import CamposSeccion from '@/components/recepcion/CamposFormulario';
@@ -55,11 +56,50 @@ function mensajeDe(e: unknown, porDefecto: string) {
   return porDefecto;
 }
 
+// Convierte a mayúsculas de forma segura (respeta null/undefined)
+const mayus = (v: string | null | undefined) => (v ?? '').toString().toUpperCase();
+
+// Mismos encabezados que el Excel de "Mis recepciones", con su ancho de columna
+const COLUMNAS_EXPORTACION: { encabezado: string; ancho: number }[] = [
+  { encabezado: 'NUMERO DE ASESORIA', ancho: 16 },
+  { encabezado: 'NOMBRE DEL USUARIO', ancho: 28 },
+  { encabezado: 'FECHA DE LA ATENCION', ancho: 16 },
+  { encabezado: 'NUMERO DE CEDULA', ancho: 16 },
+  { encabezado: 'AREA', ancho: 18 },
+  { encabezado: 'DIRECCION', ancho: 28 },
+  { encabezado: 'CORREO ELECTRONICO', ancho: 26 },
+  { encabezado: 'TELEFONO', ancho: 15 },
+  { encabezado: 'MONITOR ENCARGADO', ancho: 26 },
+  { encabezado: 'ASUNTO', ancho: 32 },
+  { encabezado: 'FECHA DEL REPARTO', ancho: 16 },
+  { encabezado: 'ESTUDIANTE ASIGNADO', ancho: 26 },
+  { encabezado: 'CÓDIGO', ancho: 14 },
+];
+
+function registroAFila(r: Registro) {
+  return [
+    mayus(r.asesoria_no),
+    mayus(r.nombres_apellidos),
+    mayus(r.fecha),
+    mayus(r.cedula_numero),
+    mayus(r.area_derecho),
+    mayus(r.direccion),
+    mayus(r.correo),
+    mayus(r.contacto_1),
+    mayus(r.estudiante_recepciona_nombre),
+    mayus(r.naturaleza_asunto),
+    mayus(r.fecha_asignacion),
+    mayus(r.nombre_estudiante),
+    mayus(r.codigo_estudiante),
+  ];
+}
+
 export default function LibroAsesoriasPage() {
   const router = useRouter();
   const [registros, setRegistros] = useState<Registro[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [exportando, setExportando] = useState(false);
 
   // Modal grande con toda la información de la asesoría (se abre al tocar una fila)
   const [detalle, setDetalle] = useState<Registro | null>(null);
@@ -322,6 +362,116 @@ export default function LibroAsesoriasPage() {
     });
   }
 
+  // Para exportar se traen TODAS las asesorías del libro (la tabla solo muestra una página)
+  async function cargarTodas(): Promise<Registro[]> {
+    const TAM = 1000;
+    const todas: Registro[] = [];
+    for (let desde = 0; ; desde += TAM) {
+      const { data, error: err } = await supabase
+        .from('libro_asesorias')
+        .select('*')
+        .order('id_recepcion')
+        .range(desde, desde + TAM - 1);
+      if (err) throw err;
+      todas.push(...((data ?? []) as Registro[]));
+      if ((data?.length ?? 0) < TAM) break;
+    }
+    // Más recientes primero. El N.º es texto: se compara como número cuando se puede.
+    return todas.sort((x, y) => {
+      const nx = Number(x.asesoria_no), ny = Number(y.asesoria_no);
+      if (!Number.isNaN(nx) && !Number.isNaN(ny) && nx !== ny) return ny - nx;
+      return (y.asesoria_no ?? '').localeCompare(x.asesoria_no ?? '');
+    });
+  }
+
+  async function exportarLibro() {
+    if (total === 0 || !esAdmin) return;
+    setExportando(true);
+    setError(null);
+    try {
+      const todas = await cargarTodas();
+
+      // Agrupar por año -> periodo (los sin fecha válida quedan al final)
+      const grupos = new Map<number, Map<'I' | 'II', Registro[]>>();
+      const sinFecha: Registro[] = [];
+      for (const registro of todas) {
+        const info = parsearFecha(registro.fecha);
+        if (!info) { sinFecha.push(registro); continue; }
+        if (!grupos.has(info.anio)) grupos.set(info.anio, new Map());
+        const porPeriodo = grupos.get(info.anio)!;
+        if (!porPeriodo.has(info.periodo)) porPeriodo.set(info.periodo, []);
+        porPeriodo.get(info.periodo)!.push(registro);
+      }
+      const anios = [...grupos.keys()].sort((a, b) => b - a);
+
+      const libro = new ExcelJS.Workbook();
+      libro.creator = 'Consultorio Jurídico';
+      libro.created = new Date();
+
+      const hoja = libro.addWorksheet('LIBRO DE ASESORIAS', {
+        views: [{ state: 'frozen', ySplit: 1 }],
+      });
+
+      hoja.columns = COLUMNAS_EXPORTACION.map((c) => ({ width: c.ancho }));
+
+      const filaTitulo = hoja.addRow(COLUMNAS_EXPORTACION.map((c) => c.encabezado));
+      filaTitulo.eachCell((celda) => {
+        celda.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF123524' } };
+        celda.font = { color: { argb: 'FFFFFFFF' }, bold: true, size: 11 };
+        celda.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        celda.border = {
+          top: { style: 'thin', color: { argb: 'FF0D2A1C' } },
+          bottom: { style: 'thin', color: { argb: 'FF0D2A1C' } },
+          left: { style: 'thin', color: { argb: 'FF0D2A1C' } },
+          right: { style: 'thin', color: { argb: 'FF0D2A1C' } },
+        };
+      });
+      filaTitulo.height = 24;
+
+      const filas: string[][] = [];
+      for (const anio of anios) {
+        const porPeriodo = grupos.get(anio)!;
+        const periodos = (['II', 'I'] as const).filter((p) => porPeriodo.has(p));
+        for (const periodo of periodos) {
+          for (const r of porPeriodo.get(periodo)!) {
+            filas.push(registroAFila(r));
+          }
+        }
+      }
+      for (const r of sinFecha) {
+        filas.push(registroAFila(r));
+      }
+
+      filas.forEach((valores, indice) => {
+        const fila = hoja.addRow(valores);
+        const esPar = indice % 2 === 1;
+        fila.eachCell((celda) => {
+          celda.alignment = { vertical: 'middle', wrapText: true };
+          celda.border = { bottom: { style: 'thin', color: { argb: 'FFE0E6E1' } } };
+          if (esPar) celda.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEF2EE' } };
+        });
+      });
+
+      const buffer = await libro.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const fechaArchivo = new Date().toISOString().slice(0, 10);
+      const url = URL.createObjectURL(blob);
+      const enlace = document.createElement('a');
+      enlace.href = url;
+      enlace.download = `LIBRO_ASESORIAS_${fechaArchivo}.xlsx`;
+      document.body.appendChild(enlace);
+      enlace.click();
+      document.body.removeChild(enlace);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(mensajeDe(e, 'No se pudo exportar el libro de asesorías.'));
+    } finally {
+      setExportando(false);
+    }
+  }
+
   // La tabla muestra la página actual en orden, con el periodo (año-I / año-II) en su propia columna.
   // Así los encabezados no se parten ni se repiten al cambiar de página.
   function periodoDe(fecha: string | null) {
@@ -331,7 +481,26 @@ export default function LibroAsesoriasPage() {
 
   return (
     <div className="cp-wrap">
-      <PanelTopbar title="Libro de asesorías" subtitle="Historial completo de asesorías, con su año y periodo." />
+      <PanelTopbar
+        title="Libro de asesorías"
+        subtitle="Historial completo de asesorías, con su año y periodo."
+        action={
+          <button
+            type="button"
+            className="cp-add-btn"
+            onClick={exportarLibro}
+            disabled={exportando || cargando || total === 0 || !esAdmin}
+            title="Descargar el libro completo en Excel"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 3v12" />
+              <polyline points="7 10 12 15 17 10" />
+              <path d="M4 19h16" />
+            </svg>
+            {exportando ? 'Exportando…' : 'Exportar'}
+          </button>
+        }
+      />
       <div className="cp-content">
 
       {error && <div className="form-message error" style={{ maxWidth: 1600, margin: '0 auto 16px' }}>{error}</div>}

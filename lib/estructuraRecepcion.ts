@@ -230,6 +230,8 @@ export function revisarFormulario(v: Valores): string[][] {
       } else if (it.tipo === 'opciones') {
         if (!hayMarcada(v, it.opciones)) faltan.push(it.label);
       } else {
+        // La unión marital de hecho solo se pregunta a las personas solteras (si es casado(a), queda NO automáticamente)
+        if (it.kSi === 'umh_si' && v.estado_civil_soltero !== 'X') continue;
         const si = !vacio(v[it.kSi]) && v[it.kSi] !== SIN_SELECCION;
         const no = !vacio(v[it.kNo]) && v[it.kNo] !== SIN_SELECCION;
         if (!si && !no) {
