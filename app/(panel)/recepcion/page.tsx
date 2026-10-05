@@ -31,7 +31,7 @@ export default function RecepcionPage() {
   const [aviso, setAviso] = useState(false); // ventana de "hay espacios sin llenar"
   const [guardando, setGuardando] = useState(false);
   const [mensaje, setMensaje] = useState<{ tipo: 'error' | 'success'; texto: string } | null>(null);
-  const [guardado, setGuardado] = useState<{ numero: number; bytes: Uint8Array; nombreArchivo: string } | null>(null);
+  const [guardado, setGuardado] = useState<{ numero: string; bytes: Uint8Array; nombreArchivo: string } | null>(null);
 
   const set = useCallback((k: string, v: string) => setValores((p) => ({ ...p, [k]: v })), []);
   const setVarios = useCallback((c: Valores) => setValores((p) => ({ ...p, ...c })), []);
@@ -100,43 +100,59 @@ export default function RecepcionPage() {
     guardar(valores);
   }
 
-  // El usuario decidió descargar aunque haya espacios sin llenar
+  // El usuario decidió descargar aunque haya espacios sin llenar.
+  // Se rellena solo para el PDF/guardado; el formulario en pantalla NO se toca
+  // (así, si el guardado falla, no quedan casillas marcadas con "-").
   function descargarDeTodasFormas() {
-    const completo = completarEnBlanco(valores);
-    setValores(completo);
-    guardar(completo);
+    guardar(completarEnBlanco(valores));
   }
 
   async function guardar(base: Valores) {
     setMensaje(null);
     setGuardando(true);
+    let archivoSubido: string | null = null;
     try {
+      // El N.º de asesoría es opcional: se puede escribir ahora o después (desde Asignación)
+      const numero = (base.asesoria_no ?? '').trim();
+
+      // Los hechos se miden en MAYÚSCULAS, igual que se imprimen en el PDF
       const medir = medidor ?? (await crearMedidor());
       for (const n of HECHOS) {
-        if (partirEnLineas(base[`sintesis_hecho_${n}`] ?? '', medir).desborde) {
+        if (partirEnLineas((base[`sintesis_hecho_${n}`] ?? '').toUpperCase(), medir).desborde) {
           irAPaso(ULTIMO_PASO);
           throw new Error(`El hecho ${n} no cabe en el espacio del formato. Acórtalo para poder guardar.`);
         }
       }
 
-      // 1. Pedir el siguiente número de asesoría de forma atómica en la BD
-      const { data: numero, error: errorNumero } = await supabase.rpc('siguiente_numero_asesoria');
-      if (errorNumero) throw errorNumero;
+      // 1. Si escribió un número, que no se repita
+      if (numero) {
+        const { data: repetida, error: errorRepetida } = await supabase
+          .from('recepciones')
+          .select('id')
+          .eq('asesoria_no', numero)
+          .limit(1);
+        if (errorRepetida) throw errorRepetida;
+        if (repetida && repetida.length > 0) {
+          irAPaso(0);
+          throw new Error(`Ya existe una asesoría con el N.º ${numero}. Revisa el número.`);
+        }
+      }
 
       // Solo se guardan los campos con contenido
       const finales: Valores = {};
-      for (const [k, v] of Object.entries({ ...base, asesoria_no: String(numero) })) {
+      for (const [k, v] of Object.entries({ ...base, asesoria_no: numero })) {
         if (typeof v === 'string' && v.trim() !== '') finales[k] = aMayusculas(k, v.trim());
       }
 
       // 2. Llenar el formato PDF con los datos
       const bytes = await generarPdfRecepcion(finales);
-      const nombreArchivo = `recepcion-${numero}-${Date.now()}.pdf`;
+      const nombreArchivo = `recepcion-${numero ? numero.replace(/[^A-Za-z0-9_-]/g, '_') : 'sin-numero'}-${Date.now()}.pdf`;
       const blob = new Blob([bytes as BlobPart], { type: 'application/pdf' });
 
       // 3. Subir el PDF a Supabase Storage (bucket "recepciones")
       const { error: errorSubida } = await supabase.storage.from('recepciones').upload(nombreArchivo, blob);
       if (errorSubida) throw errorSubida;
+      archivoSubido = nombreArchivo;
       const { data: urlData } = supabase.storage.from('recepciones').getPublicUrl(nombreArchivo);
 
       // 4. Separar los datos: columnas individuales vs JSON "detalles"
@@ -153,12 +169,15 @@ export default function RecepcionPage() {
         monitor_id: user?.id,
       });
       if (errorInsert) throw errorInsert;
+      archivoSubido = null; // todo salió bien: el PDF se queda en Storage
 
       // 5. Todo guardado: descargar el PDF
       descargarArchivo(bytes, nombreArchivo);
-      setGuardado({ numero: Number(numero), bytes, nombreArchivo });
+      setGuardado({ numero, bytes, nombreArchivo });
       document.querySelector('.cp-content')?.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
+      // Si el PDF alcanzó a subirse pero no se pudo guardar el registro, se borra para no dejarlo huérfano
+      if (archivoSubido) await supabase.storage.from('recepciones').remove([archivoSubido]);
       const texto = err instanceof Error
         ? err.message
         : typeof err === 'object' && err && 'message' in err
@@ -189,7 +208,10 @@ export default function RecepcionPage() {
             {guardado && (
               <div className="form-message success rf-exito">
                 <span>
-                  Recepción guardada con el N.º de asesoría <strong>{guardado.numero}</strong>. El PDF se descargó automáticamente.
+                  {guardado.numero
+                    ? <>Recepción guardada con el N.º de asesoría <strong>{guardado.numero}</strong>.</>
+                    : <>Recepción guardada sin N.º de asesoría (se puede colocar después).</>}{' '}
+                  El PDF se descargó automáticamente.
                 </span>
                 <div className="rf-exito-acciones">
                   <button type="button" className="btn-secundario" onClick={() => descargarArchivo(guardado.bytes, guardado.nombreArchivo)}>
@@ -223,11 +245,7 @@ export default function RecepcionPage() {
             </nav>
             <div className="rf-progreso">Sección {paso + 1} de {SECCIONES.length}</div>
 
-            <CamposSeccion
-              paso={paso}
-              medidor={medidor}
-              numeroAsesoria={guardado ? String(guardado.numero) : ''}
-            />
+            <CamposSeccion paso={paso} medidor={medidor} />
 
             {/* ───────── Barra de navegación ───────── */}
             <div className="rf-barra">

@@ -107,28 +107,60 @@ export default function MisRecepcionesPage() {
       if (perfil?.rol === 'administrador') { router.replace('/libro-asesorias'); return; }
       if (perfil?.rol !== 'monitor') { router.replace('/login'); return; }
 
-      // 1. ¿Cuáles recepciones son suyas?
-      const { data: propias, error: errorPropias } = await supabase
-        .from('recepciones')
-        .select('id')
-        .eq('monitor_id', user.id);
+      // 1. Las recepciones del monitor, directo de la tabla "recepciones" y en bloques de 1000
+      //    (así no se topa con el límite de filas de la API).
+      const TAM = 1000;
+      const propias: Registro[] = [];
+      const idPorFila: string[] = [];
+      for (let desde = 0; ; desde += TAM) {
+        const { data, error: errorPropias } = await supabase
+          .from('recepciones')
+          .select('id, asesoria_no, fecha, nombres_apellidos, cedula_numero, area_derecho, direccion, contacto_1, correo, estudiante_recepciona_nombre, naturaleza_asunto, pdf_url')
+          .eq('monitor_id', user.id)
+          .order('id')
+          .range(desde, desde + TAM - 1);
+        if (cancelado) return;
+        if (errorPropias) { setError(errorPropias.message); setCargando(false); return; }
+        (data ?? []).forEach((r) => {
+          idPorFila.push(r.id as string);
+          propias.push({
+            asesoria_no: r.asesoria_no, fecha: r.fecha, nombres_apellidos: r.nombres_apellidos,
+            cedula_numero: r.cedula_numero, area_derecho: r.area_derecho, direccion: r.direccion,
+            contacto_1: r.contacto_1, correo: r.correo,
+            estudiante_recepciona_nombre: r.estudiante_recepciona_nombre,
+            naturaleza_asunto: r.naturaleza_asunto, pdf_url: r.pdf_url,
+            fecha_asignacion: null, nombre_estudiante: null, codigo_estudiante: null,
+          });
+        });
+        if ((data?.length ?? 0) < TAM) break;
+      }
 
-      if (cancelado) return;
-      if (errorPropias) { setError(errorPropias.message); setCargando(false); return; }
+      // 2. Datos de asignación (estudiante, código, fecha del reparto) desde la vista, en bloques de 100 ids.
+      //    Si la vista no se puede leer, igual se muestran las recepciones (solo sin la info de asignación).
+      for (let i = 0; i < idPorFila.length; i += 100) {
+        const bloque = idPorFila.slice(i, i + 100);
+        const { data: asignaciones } = await supabase
+          .from('libro_asesorias')
+          .select('id_recepcion, fecha_asignacion, nombre_estudiante, codigo_estudiante')
+          .in('id_recepcion', bloque);
+        if (cancelado) return;
+        (asignaciones ?? []).forEach((a: { id_recepcion: string; fecha_asignacion: string | null; nombre_estudiante: string | null; codigo_estudiante: string | null }) => {
+          const pos = idPorFila.indexOf(a.id_recepcion);
+          if (pos >= 0) {
+            propias[pos].fecha_asignacion = a.fecha_asignacion;
+            propias[pos].nombre_estudiante = a.nombre_estudiante;
+            propias[pos].codigo_estudiante = a.codigo_estudiante;
+          }
+        });
+      }
 
-      const ids = (propias ?? []).map((r) => r.id);
-      if (ids.length === 0) { setRegistros([]); setCargando(false); return; }
-
-      // 2. Traer esas recepciones desde la vista, con la info de asignación ya incluida
-      const { data, error } = await supabase
-        .from('libro_asesorias')
-        .select('*')
-        .in('id_recepcion', ids)
-        .order('asesoria_no', { ascending: false });
-
-      if (cancelado) return;
-      if (error) setError(error.message);
-      else setRegistros(data ?? []);
+      // Más recientes primero. El N.º es texto: se compara como número cuando se puede.
+      const orden = propias.map((r, i) => ({ r, i })).sort((x, y) => {
+        const nx = Number(x.r.asesoria_no), ny = Number(y.r.asesoria_no);
+        if (!Number.isNaN(nx) && !Number.isNaN(ny) && nx !== ny) return ny - nx;
+        return (y.r.asesoria_no ?? '').localeCompare(x.r.asesoria_no ?? '');
+      });
+      setRegistros(orden.map((o) => o.r));
       setCargando(false);
     }
 
@@ -354,7 +386,9 @@ export default function MisRecepcionesPage() {
       {error && <div className="form-message error" style={{ maxWidth: 1600, margin: '0 auto 16px' }}>{error}</div>}
       {cargando && <p className="admin-estado-cargando">Cargando...</p>}
       {!cargando && registros.length === 0 && !error && (
-        <p className="admin-estado-vacio">Todavía no has recepcionado ninguna asesoría.</p>
+        <p className="admin-estado-vacio">
+          Todavía no has recepcionado ninguna asesoría. Si ya guardaste alguna y no aparece, avisa al administrador.
+        </p>
       )}
 
       {anios.map((anio) => {

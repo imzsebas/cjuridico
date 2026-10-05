@@ -51,13 +51,9 @@ function Hecho({ n, medidor }: { n: number; medidor: Medidor | null }) {
 export default function CamposSeccion({
   paso,
   medidor,
-  numeroAsesoria = '',
-  numeroEditable = false,
 }: {
   paso: number; // 0 a 5
   medidor: Medidor | null;
-  numeroAsesoria?: string; // se muestra de solo lectura (Recepción: se asigna al guardar)
-  numeroEditable?: boolean; // en la edición el N.º de asesoría se puede cambiar
 }) {
   const { valores, set } = useFormulario();
   return (
@@ -66,14 +62,8 @@ export default function CamposSeccion({
     {paso === 0 && (
       <Seccion titulo={`1. ${SECCIONES[0].titulo}`}>
         <Fila>
-          {numeroEditable ? (
-            <Texto k="asesoria_no" label="N.º asesoría" inputMode="numeric" />
-          ) : (
-            <div className="rf-campo">
-              <label htmlFor="rf-asesoria_no">N.º asesoría</label>
-              <input id="rf-asesoria_no" type="text" readOnly value={numeroAsesoria} placeholder="Se asigna al guardar" />
-            </div>
-          )}
+          {/* El N.º de asesoría SIEMPRE se escribe a mano (monitor o administrador); es opcional y se puede poner después */}
+          <Texto k="asesoria_no" label="N.º asesoría" inputMode="numeric" />
           <div className="rf-campo">
             <label htmlFor="rf-fecha">Fecha</label>
             <input

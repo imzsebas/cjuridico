@@ -1134,3 +1134,25 @@ a.btn-secundario { display: flex; align-items: center; justify-content: center; 
 /* Lo que se escribe en el formulario de recepción se ve en mayúsculas (el correo se deja como se escribe) */
 .rf-campo input, .rf-campo textarea { text-transform: uppercase; }
 .rf-campo input[type="email"], #rf-correo { text-transform: none; }
+
+/* Botones del modal más pequeños y sencillos (Libro de asesorías) */
+.modal-acciones.modal-acciones-compactas { justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding: 12px 20px; }
+.modal-acciones-compactas .btn-primary,
+.modal-acciones-compactas .btn-secundario,
+.modal-acciones-compactas .btn-peligro {
+  width: auto; padding: 8px 16px; font-size: 0.85rem; border-radius: 8px;
+}
+.modal-acciones-compactas a.btn-secundario { display: inline-flex; }
+.modal-acciones-compactas .acciones-izquierda { margin-right: auto; }
+
+/* Confirmación de eliminar */
+.btn-peligro {
+  border: none; background: #b3261e; color: var(--white); font-weight: 600; cursor: pointer;
+  transition: background 0.15s ease;
+}
+.btn-peligro:hover { background: #8c1d18; }
+.btn-peligro:disabled { opacity: 0.45; cursor: not-allowed; }
+.aviso-peligro {
+  background: #fbeceb; border: 1px solid #e7c3bf; color: #8a2a24; border-radius: 10px;
+  padding: 10px 12px; font-size: 13.5px; line-height: 1.45; margin-bottom: 12px;
+}
