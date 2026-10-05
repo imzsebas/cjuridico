@@ -291,7 +291,7 @@ export default function LibroAsesoriasPage() {
                   download
                   title="El PDF tal como se guardó cuando se hizo la recepción"
                 >
-                  Descargar PDF guardado
+                  Ver formato de recepción
                 </a>
               )}
               <button
@@ -300,7 +300,7 @@ export default function LibroAsesoriasPage() {
                 disabled={!detalle.id_recepcion || generando}
                 title="Vuelve a llenar el formato con los datos que hay hoy en el sistema"
               >
-                {generando ? 'Generando...' : 'Descargar PDF con datos actuales'}
+                {generando ? 'Generando...' : 'Descargar formato de recepción'}
               </button>
             </div>
           </div>
