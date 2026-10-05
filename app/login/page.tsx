@@ -6,24 +6,15 @@ import { supabase } from '@/lib/supabase'; // ajusta esta ruta si tu cliente est
 
 export default function LoginPage() {
   const router = useRouter();
-  const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [correo, setCorreo] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
+  const [message, setMessage] = useState<{ type: 'error'; text: string } | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setMessage(null);
-
-    if (mode === 'signup') {
-      const { error } = await supabase.auth.signUp({ email: correo, password });
-      if (error) setMessage({ type: 'error', text: error.message });
-      else setMessage({ type: 'success', text: 'Cuenta creada. Revisa tu correo para confirmarla.' });
-      setLoading(false);
-      return;
-    }
 
     const { data, error } = await supabase.auth.signInWithPassword({ email: correo, password });
     if (error) {
@@ -46,22 +37,41 @@ export default function LoginPage() {
 
   return (
     <div className="auth-page">
+      <div className="auth-deco-1" />
+      <div className="auth-deco-2" />
+
       <div className="auth-brand">
-        <div className="auth-emblem">CJ</div>
-        <h1>Consultorio Jurídico</h1>
-        <div className="auth-brand-divider" />
-        <p className="auth-brand-sub">Unicórdoba</p>
-        <p className="auth-brand-tagline">Accede a tu cuenta para continuar</p>
+        <div className="auth-badge">
+          <div className="auth-badge-dot" />
+          <span>Sistema Activo</span>
+        </div>
+        <div className="auth-brand-title">
+          Consultorio <span>Jurídico</span>
+        </div>
+        <div className="auth-brand-sub">Unicórdoba</div>
+        <div className="auth-brand-desc">
+          Gestión integral de la recepción, asignación y seguimiento de asesorías.
+        </div>
+        <div className="auth-stats">
+          <div>
+            <div className="auth-stat-num">Recepción</div>
+            <div className="auth-stat-label">De casos</div>
+          </div>
+          <div>
+            <div className="auth-stat-num">Asignación</div>
+            <div className="auth-stat-label">A estudiantes</div>
+          </div>
+          <div>
+            <div className="auth-stat-num">Asesorías</div>
+            <div className="auth-stat-label">Seguimiento</div>
+          </div>
+        </div>
       </div>
 
       <div className="auth-form-side">
         <div className="auth-card">
-          <h2>{mode === 'login' ? 'Iniciar sesión' : 'Crear cuenta'}</h2>
-          <p className="subtitle">
-            {mode === 'login' ? 'Ingresa tus datos para continuar' : 'Regístrate con tu correo'}
-          </p>
-
-          {message && <div className={`form-message ${message.type}`}>{message.text}</div>}
+          <h2>Bienvenido</h2>
+          <p className="subtitle">Ingrese sus credenciales para continuar</p>
 
           <form onSubmit={handleSubmit}>
             <div className="field">
@@ -89,18 +99,14 @@ export default function LoginPage() {
               />
             </div>
 
+            <div className="auth-divider" />
+
+            {message && <div className={`form-message ${message.type}`}>{message.text}</div>}
+
             <button className="btn-primary" type="submit" disabled={loading}>
-              {loading ? 'Cargando...' : mode === 'login' ? 'Iniciar sesión' : 'Crear cuenta'}
+              {loading ? 'Verificando...' : 'Iniciar sesión →'}
             </button>
           </form>
-
-          <div className="switch-mode">
-            {mode === 'login' ? (
-              <>¿No tienes cuenta? <button onClick={() => setMode('signup')}>Regístrate</button></>
-            ) : (
-              <>¿Ya tienes cuenta? <button onClick={() => setMode('login')}>Inicia sesión</button></>
-            )}
-          </div>
         </div>
       </div>
     </div>
