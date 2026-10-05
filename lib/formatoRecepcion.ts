@@ -14,10 +14,21 @@ export const CAMPOS_INDIVIDUALES = [
   'estudiante_recepciona_nombre', 'estudiante_recepciona_codigo',
 ];
 
-// Tamaño de letra de los campos del PDF y ancho útil (en puntos) de cada una de las
-// 3 líneas que tiene cada hecho en la "Síntesis de los hechos".
+// Tamaño de letra de los campos del PDF y espacio de cada hecho en la "Síntesis de los hechos":
+// ahora cada hecho es UN solo cuadro de texto de varias líneas (antes eran 3 campos de una línea).
+// LINEAS_HECHO = cuántas líneas caben en el cuadro; ANCHO_HECHO = ancho útil de cada línea (en puntos).
 export const TAM_FUENTE = 7.994;
-export const ANCHOS_HECHO = [521, 533, 533];
+export const LINEAS_HECHO = 4;
+export const ANCHO_HECHO = 515;
+export const ANCHOS_HECHO = Array<number>(LINEAS_HECHO).fill(ANCHO_HECHO);
+
+// Campos del PDF cuyo nombre en la plantilla no coincide con el que usa la app
+// (nombre en el PDF -> nombre que usa la app). Así la plantilla funciona sin tener que renombrarlos.
+const ALIAS_CAMPOS_PDF: Record<string, string> = {
+  escolaridad_bachiller_2: 'escolaridad_primaria',
+  escolaridad_pregrado_2: 'escolaridad_tecnico',
+  ingresos_mensuales_2: 'estrato',
+};
 
 // Casillas "Con reparto / Sin reparto": en el PDF actual están dibujadas pero no tienen campo,
 // así que se marcan con una X en estas coordenadas (página 2, en puntos).
@@ -25,6 +36,11 @@ const MARCAS_SIN_CAMPO: Record<string, { pagina: number; x: number; y: number }>
   asesoria_con_reparto: { pagina: 1, x: 164.6, y: 574.1 },
   asesoria_sin_reparto: { pagina: 1, x: 254.6, y: 574.1 },
 };
+
+// Todo el texto se guarda y se imprime en MAYÚSCULAS, excepto el correo electrónico
+export const CAMPOS_SIN_MAYUSCULAS = ['correo'];
+export const aMayusculas = (clave: string, valor: string) =>
+  CAMPOS_SIN_MAYUSCULAS.includes(clave.trim()) ? valor : valor.toUpperCase();
 
 // "ingresos mensuales", " poblacion_room"… -> "ingresos_mensuales", "poblacion_room"
 export const norm = (s: string) => s.trim().replace(/\s+/g, '_');
@@ -115,24 +131,31 @@ export async function generarPdfRecepcion(valores: Valores): Promise<Uint8Array>
   for (const [k, v] of Object.entries(valores)) {
     const valor = v as unknown;
     if (valor === null || valor === undefined || valor === false) continue;
-    datos[norm(k)] = valor === true ? 'X' : String(valor);
+    datos[norm(k)] = aMayusculas(norm(k), valor === true ? 'X' : String(valor));
   }
 
-  // Cada hecho se reparte en sus 3 líneas del formato
+  // Cada hecho va en su cuadro del formato (campo "sintesis_hecho_N1"), con saltos de línea ya calculados.
+  // Los registros antiguos traían el hecho partido en 3 líneas (_N1, _N2, _N3): se juntan y se vuelven a acomodar.
   for (let n = 1; n <= 5; n++) {
-    const texto = datos[`sintesis_hecho_${n}`];
-    if (texto === undefined) continue;
-    partirEnLineas(texto, medir).lineas.forEach((linea, i) => {
-      datos[`sintesis_hecho_${n}${i + 1}`] = linea;
-    });
+    const completo =
+      datos[`sintesis_hecho_${n}`] ??
+      [1, 2, 3].map((i) => datos[`sintesis_hecho_${n}${i}`]).filter(Boolean).join(' ');
+    if (!completo) continue;
+    datos[`sintesis_hecho_${n}1`] = partirEnLineas(completo, medir).lineas.join('\n');
   }
 
   const llenados = new Set<string>();
   for (const campo of form.getFields()) {
-    const clave = norm(campo.getName());
+    const nombre = norm(campo.getName());
+    const clave = ALIAS_CAMPOS_PDF[nombre] ?? nombre;
     const valor = datos[clave];
     if (valor === undefined || !(campo instanceof PDFTextField)) continue;
-    campo.setText(limpiarTexto(valor));
+    if (/^sintesis_hecho_\d1$/.test(clave)) {
+      campo.enableMultiline(); // el cuadro del hecho es de varias líneas
+      campo.setText(valor.split('\n').map(limpiarTexto).join('\n'));
+    } else {
+      campo.setText(limpiarTexto(valor));
+    }
     llenados.add(clave);
   }
 

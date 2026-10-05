@@ -1,11 +1,16 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase'; // ajusta la ruta si tu cliente está en otro lugar
 import PanelTopbar from '@/components/PanelTopbar';
 import Paginacion, { POR_PAGINA } from '@/components/Paginacion';
-import { SeccionCaso, repartoDe, resumenCaso } from '@/lib/estructuraRecepcion';
+import { FormProvider } from '@/components/recepcion/Controles';
+import CamposSeccion from '@/components/recepcion/CamposFormulario';
+import {
+  HECHOS, SECCIONES, SeccionCaso, prepararEdicion, repartoDe, resumenCaso, valoresParaEditar,
+} from '@/lib/estructuraRecepcion';
+import { Medidor, Valores, crearMedidor, partirEnLineas } from '@/lib/formatoRecepcion';
 
 // Esta página va en una ruta de administrador, por ejemplo: app/asignacion/page.tsx
 // Requiere que en la tabla "recepciones" exista la columna "estudiante_asignado_nombre"
@@ -82,13 +87,22 @@ export default function AsignacionPage() {
   // Modal grande con toda la información del caso (se abre al tocar una fila)
   const [detalleCaso, setDetalleCaso] = useState<Registro | null>(null);
   const [datosCaso, setDatosCaso] = useState<SeccionCaso[] | null>(null);
-  const [pdfCaso, setPdfCaso] = useState<string | null>(null);
+  const [filaCaso, setFilaCaso] = useState<Record<string, unknown> | null>(null);
   const [errorCaso, setErrorCaso] = useState<string | null>(null);
 
-  // Modal de edición rápida (asesoría N°, nombres, área)
-  const [editando, setEditando] = useState<Registro | null>(null);
-  const [formEditar, setFormEditar] = useState({ asesoria_no: '', nombres_apellidos: '', area_derecho: '' });
+  // Edición de TODOS los datos de la asesoría, en ese mismo modal grande
+  const [modoEdicion, setModoEdicion] = useState(false);
+  const [valoresEdicion, setValoresEdicion] = useState<Valores>({});
+  const [medidor, setMedidor] = useState<Medidor | null>(null);
   const [guardandoEdicion, setGuardandoEdicion] = useState(false);
+  const [errorEdicion, setErrorEdicion] = useState<string | null>(null);
+
+  const setCampo = useCallback((k: string, v: string) => setValoresEdicion((p) => ({ ...p, [k]: v })), []);
+  const setCampos = useCallback((c: Valores) => setValoresEdicion((p) => ({ ...p, ...c })), []);
+  const contextoEdicion = useMemo(
+    () => ({ valores: valoresEdicion, set: setCampo, setVarios: setCampos }),
+    [valoresEdicion, setCampo, setCampos]
+  );
 
   // Modal de asignación (nivel de consultorio + checkboxes de estudiantes)
   const [asignando, setAsignando] = useState<Registro | null>(null);
@@ -191,7 +205,7 @@ export default function AsignacionPage() {
     let cancelado = false;
     async function cargarCaso(id: string) {
       setDatosCaso(null);
-      setPdfCaso(null);
+      setFilaCaso(null);
       setErrorCaso(null);
       const { data, error } = await supabase.from('recepciones').select('*').eq('id', id).single();
       if (cancelado) return;
@@ -200,7 +214,7 @@ export default function AsignacionPage() {
         return;
       }
       setDatosCaso(resumenCaso(data));
-      setPdfCaso(typeof data.pdf_url === 'string' ? data.pdf_url : null);
+      setFilaCaso(data);
     }
     cargarCaso(detalleCaso.id);
     return () => { cancelado = true; };
@@ -230,35 +244,66 @@ export default function AsignacionPage() {
     return registrosPorEstudiante.get(normalizar(nombreEstudiante)) ?? [];
   }
 
-  function abrirEditar(registro: Registro) {
-    setEditando(registro);
-    setFormEditar({
-      asesoria_no: registro.asesoria_no ?? '',
-      nombres_apellidos: registro.nombres_apellidos ?? '',
-      area_derecho: registro.area_derecho ?? '',
-    });
+  function cerrarDetalle() {
+    setDetalleCaso(null);
+    setModoEdicion(false);
+    setErrorEdicion(null);
+  }
+
+  // Pasa el modal a modo edición con todos los datos guardados del caso
+  function iniciarEdicion() {
+    if (!filaCaso) return;
+    setValoresEdicion(valoresParaEditar(filaCaso));
+    setErrorEdicion(null);
+    setModoEdicion(true);
+    if (!medidor) crearMedidor().then((m) => setMedidor(() => m));
+    document.querySelector('.modal-card-grande .modal-card-cuerpo')?.scrollTo({ top: 0 });
+  }
+
+  function cancelarEdicion() {
+    setModoEdicion(false);
+    setErrorEdicion(null);
   }
 
   async function guardarEdicion() {
-    if (!editando) return;
-    setGuardandoEdicion(true);
-    const { error } = await supabase
-      .from('recepciones')
-      .update({
-        asesoria_no: formEditar.asesoria_no || null,
-        nombres_apellidos: formEditar.nombres_apellidos || null,
-        area_derecho: formEditar.area_derecho || null,
-      })
-      .eq('id', editando.id);
+    if (!detalleCaso) return;
+    setErrorEdicion(null);
 
-    setGuardandoEdicion(false);
-    if (error) {
-      setMensaje({ tipo: 'error', texto: error.message });
+    if (!(valoresEdicion.nombres_apellidos ?? '').trim()) {
+      setErrorEdicion('Falta el nombre del usuario (sección 1).');
       return;
     }
-    setEditando(null);
+    const medir = medidor ?? (await crearMedidor());
+    for (const n of HECHOS) {
+      const texto = (valoresEdicion[`sintesis_hecho_${n}`] ?? '').toUpperCase();
+      if (partirEnLineas(texto, medir).desborde) {
+        setErrorEdicion(`El hecho ${n} no cabe en el espacio del formato. Acórtalo para poder guardar.`);
+        return;
+      }
+    }
+
+    setGuardandoEdicion(true);
+    const { columnas, detalles } = prepararEdicion(valoresEdicion);
+    const { error } = await supabase
+      .from('recepciones')
+      .update({ ...columnas, detalles })
+      .eq('id', detalleCaso.id);
+    setGuardandoEdicion(false);
+
+    if (error) {
+      setErrorEdicion(error.message);
+      return;
+    }
+    setModoEdicion(false);
     setCasosAsignados(null);
     setRecarga((n) => n + 1);
+    // Se vuelve a mostrar el caso ya con los datos nuevos
+    setDetalleCaso({
+      ...detalleCaso,
+      asesoria_no: columnas.asesoria_no,
+      nombres_apellidos: columnas.nombres_apellidos,
+      area_derecho: columnas.area_derecho,
+    });
   }
 
   function abrirAsignar(registro: Registro) {
@@ -394,109 +439,84 @@ export default function AsignacionPage() {
 
     <Paginacion pagina={pagina} total={total} onCambiar={setPagina} />
 
-    {/* Modal grande: toda la información del caso (aquí están Editar y Asignar) */}
+    {/* Modal grande: toda la información del caso. Aquí se puede editar todo, asignar o cerrar */}
     {detalleCaso && (
-      <div className="modal-overlay" onClick={() => setDetalleCaso(null)}>
+      <div className="modal-overlay" onClick={() => { if (!modoEdicion) cerrarDetalle(); }}>
         <div className="modal-card modal-card-grande" onClick={(e) => e.stopPropagation()}>
           <div className="modal-card-cuerpo">
             <div className="caso-encabezado">
-              <h3>Asesoría N° {detalleCaso.asesoria_no || 'sin número'}</h3>
-              {pdfCaso && (
-                <a className="caso-pdf" href={pdfCaso} target="_blank" rel="noreferrer">Ver PDF</a>
-              )}
-            </div>
-            <div className="caso-resumen">
-              <div><span>Usuario</span><strong>{detalleCaso.nombres_apellidos || '—'}</strong></div>
-              <div><span>Estudiante asignado</span><strong>{detalleCaso.nombre_estudiante || 'Sin asignar'}</strong></div>
-              <div><span>Reparto</span><strong>{repartoPorId[detalleCaso.id] ?? '—'}</strong></div>
+              <h3>
+                {modoEdicion ? 'Editar asesoría' : 'Asesoría'} N° {detalleCaso.asesoria_no || 'sin número'}
+              </h3>
             </div>
 
-            {errorCaso ? (
-              <div className="form-message error">{errorCaso}</div>
-            ) : datosCaso === null ? (
-              <p className="admin-estado-cargando" style={{ margin: 0 }}>Cargando información del caso...</p>
+            {modoEdicion ? (
+              <FormProvider value={contextoEdicion}>
+                <div className="rf">
+                  {SECCIONES.map((sec, i) => (
+                    <CamposSeccion key={sec.titulo} paso={i} medidor={medidor} numeroEditable />
+                  ))}
+                </div>
+              </FormProvider>
             ) : (
-              datosCaso.map((sec, i) => (
-                <section key={sec.titulo} className="caso-seccion">
-                  <h4 className="caso-seccion-titulo">{i + 1}. {sec.titulo}</h4>
-                  <div className="caso-datos">
-                    {sec.datos.map((d) => (
-                      <div key={d.label} className={`caso-dato${d.largo ? ' largo' : ''}`}>
-                        <span>{d.label}</span>
-                        <p>{d.valor}</p>
+              <>
+                <div className="caso-resumen">
+                  <div><span>Usuario</span><strong>{detalleCaso.nombres_apellidos || '—'}</strong></div>
+                  <div><span>Estudiante asignado</span><strong>{detalleCaso.nombre_estudiante || 'Sin asignar'}</strong></div>
+                  <div><span>Reparto</span><strong>{repartoPorId[detalleCaso.id] ?? '—'}</strong></div>
+                </div>
+
+                {errorCaso ? (
+                  <div className="form-message error">{errorCaso}</div>
+                ) : datosCaso === null ? (
+                  <p className="admin-estado-cargando" style={{ margin: 0 }}>Cargando información del caso...</p>
+                ) : (
+                  datosCaso.map((sec, i) => (
+                    <section key={sec.titulo} className="caso-seccion">
+                      <h4 className="caso-seccion-titulo">{i + 1}. {sec.titulo}</h4>
+                      <div className="caso-datos">
+                        {sec.datos.map((d) => (
+                          <div key={d.label} className={`caso-dato${d.largo ? ' largo' : ''}`}>
+                            <span>{d.label}</span>
+                            <p>{d.valor}</p>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                </section>
-              ))
+                    </section>
+                  ))
+                )}
+              </>
             )}
           </div>
 
-          <div className="modal-acciones">
-            <button className="btn-secundario" onClick={() => setDetalleCaso(null)}>Cerrar</button>
-            <button
-              className="btn-secundario"
-              onClick={() => { const r = detalleCaso; setDetalleCaso(null); abrirEditar(r); }}
-            >
-              Editar
-            </button>
-            <button
-              className="btn-primary"
-              onClick={() => { const r = detalleCaso; setDetalleCaso(null); abrirAsignar(r); }}
-            >
-              Asignar
-            </button>
-          </div>
-        </div>
-      </div>
-    )}
-
-    {/* Modal: edición rápida */}
-    {editando && (
-      <div className="modal-overlay" onClick={() => !guardandoEdicion && setEditando(null)}>
-        <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-          <div className="modal-card-cuerpo">
-            <h3>Editar caso</h3>
-
-            <div className="field">
-              <label htmlFor="asesoria_no">N° de asesoría</label>
-              <input
-                id="asesoria_no"
-                type="text"
-                value={formEditar.asesoria_no}
-                onChange={(e) => setFormEditar((f) => ({ ...f, asesoria_no: e.target.value }))}
-                placeholder="Ej: 245"
-              />
-            </div>
-
-            <div className="field">
-              <label htmlFor="nombres_apellidos">Nombres y apellidos</label>
-              <input
-                id="nombres_apellidos"
-                type="text"
-                value={formEditar.nombres_apellidos}
-                onChange={(e) => setFormEditar((f) => ({ ...f, nombres_apellidos: e.target.value }))}
-              />
-            </div>
-
-            <div className="field">
-              <label htmlFor="area_derecho">Área de derecho</label>
-              <input
-                id="area_derecho"
-                type="text"
-                value={formEditar.area_derecho}
-                onChange={(e) => setFormEditar((f) => ({ ...f, area_derecho: e.target.value }))}
-              />
-            </div>
-          </div>
+          {errorEdicion && (
+            <div className="form-message error" style={{ margin: '0 24px 12px' }}>{errorEdicion}</div>
+          )}
 
           <div className="modal-acciones">
-            <button className="btn-secundario" onClick={() => setEditando(null)} disabled={guardandoEdicion}>
-              Cancelar
-            </button>
-            <button className="btn-primary" onClick={guardarEdicion} disabled={guardandoEdicion}>
-              {guardandoEdicion ? 'Guardando...' : 'Guardar'}
-            </button>
+            {modoEdicion ? (
+              <>
+                <button className="btn-secundario" onClick={cancelarEdicion} disabled={guardandoEdicion}>
+                  Cancelar
+                </button>
+                <button className="btn-primary" onClick={guardarEdicion} disabled={guardandoEdicion}>
+                  {guardandoEdicion ? 'Guardando...' : 'Guardar cambios'}
+                </button>
+              </>
+            ) : (
+              <>
+                <button className="btn-secundario" onClick={cerrarDetalle}>Cerrar</button>
+                <button className="btn-secundario" onClick={iniciarEdicion} disabled={!filaCaso}>
+                  Editar
+                </button>
+                <button
+                  className="btn-primary"
+                  onClick={() => { const r = detalleCaso; cerrarDetalle(); abrirAsignar(r); }}
+                >
+                  Asignar
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>

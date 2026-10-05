@@ -75,6 +75,8 @@ export function Lista({
       <label htmlFor={`rf-${k}`}>{label}</label>
       <select id={`rf-${k}`} value={valores[k] ?? ''} onChange={(e) => set(k, e.target.value)}>
         <option value="">{placeholder}</option>
+        {/* Si el caso trae un valor que no está en la lista (registros antiguos), se muestra también */}
+        {valores[k] && !opciones.includes(valores[k]) && <option value={valores[k]}>{valores[k]}</option>}
         {opciones.map((o) => <option key={o} value={o}>{o}</option>)}
       </select>
     </div>

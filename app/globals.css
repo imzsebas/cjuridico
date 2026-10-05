@@ -1129,3 +1129,7 @@ body {
 a.btn-secundario { display: flex; align-items: center; justify-content: center; text-align: center; text-decoration: none; }
 .btn-secundario.btn-eliminar { color: #b3261e; border-color: #e7c3bf; }
 .btn-secundario.btn-eliminar:hover { background: #fbeceb; }
+
+/* Lo que se escribe en el formulario de recepción se ve en mayúsculas (el correo se deja como se escribe) */
+.rf-campo input, .rf-campo textarea { text-transform: uppercase; }
+.rf-campo input[type="email"], #rf-correo { text-transform: none; }

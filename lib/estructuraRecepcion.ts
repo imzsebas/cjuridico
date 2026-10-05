@@ -1,7 +1,7 @@
 // Estructura del formulario de recepción por secciones: qué campos tiene cada una,
 // cuáles quedaron en blanco y cómo se rellenan si la persona decide descargar igual.
 
-import { valoresDesdeFila, type Valores } from '@/lib/formatoRecepcion';
+import { CAMPOS_INDIVIDUALES, aMayusculas, norm, valoresDesdeFila, type Valores } from '@/lib/formatoRecepcion';
 
 // Lo que se escribe cuando algo queda sin llenar y se descarga de todas formas.
 export const SIN_TEXTO = 'N/A'; // espacios de texto vacíos
@@ -323,4 +323,49 @@ export function resumenCaso(fila: Record<string, unknown>): SeccionCaso[] {
     }
     return { titulo: sec.titulo, datos };
   });
+}
+
+// ───────── Para editar una asesoría ya guardada (pantalla de Asignación) ─────────
+
+// Convierte lo guardado en la base de datos en los valores que usa el formulario:
+// - las casillas guardadas con "-" (no se eligió nada) vuelven a quedar sin marcar
+// - los hechos antiguos, guardados partidos en 3 líneas, se juntan en un solo texto
+export function valoresParaEditar(fila: Record<string, unknown>): Valores {
+  const v = valoresDesdeFila(fila);
+
+  const casillas: string[] = [];
+  for (const sec of SECCIONES) {
+    for (const it of sec.items) {
+      if (it.tipo === 'opciones') it.opciones.forEach((o) => casillas.push(o.k));
+      else if (it.tipo === 'sino') {
+        casillas.push(it.kSi, it.kNo);
+        it.subopciones?.opciones.forEach((o) => casillas.push(o.k));
+      }
+    }
+  }
+  for (const k of casillas) if (v[k] === SIN_SELECCION) delete v[k];
+
+  for (const n of HECHOS) {
+    const lineas = [1, 2, 3].map((i) => v[`sintesis_hecho_${n}${i}`]).filter(Boolean);
+    if (!v[`sintesis_hecho_${n}`] && lineas.length) v[`sintesis_hecho_${n}`] = lineas.join(' ');
+    [1, 2, 3].forEach((i) => delete v[`sintesis_hecho_${n}${i}`]);
+  }
+  return v;
+}
+
+// Separa lo que se va a guardar al editar: columnas propias de "recepciones" y el JSON "detalles".
+// Todo va en mayúsculas (menos el correo) y lo que quedó vacío se borra.
+export function prepararEdicion(v: Valores): { columnas: Record<string, string | null>; detalles: Record<string, string> } {
+  const columnas: Record<string, string | null> = {};
+  const detalles: Record<string, string> = {};
+  CAMPOS_INDIVIDUALES.forEach((k) => { columnas[k] = null; });
+  for (const [clave, valor] of Object.entries(v)) {
+    const k = norm(clave);
+    const texto = (valor ?? '').trim();
+    if (texto === '') continue;
+    const final = aMayusculas(k, texto);
+    if (CAMPOS_INDIVIDUALES.includes(k)) columnas[k] = final;
+    else detalles[k] = final;
+  }
+  return { columnas, detalles };
 }
