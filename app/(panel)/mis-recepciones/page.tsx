@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase'; // ajusta la ruta si tu cliente está en otro lugar
+import { abrirPdf } from '@/lib/pdfPrivado';
 import PanelTopbar from '@/components/PanelTopbar';
 import ExcelJS from 'exceljs';
 import Paginacion, { POR_PAGINA } from '@/components/Paginacion';
@@ -470,16 +471,13 @@ export default function MisRecepcionesPage() {
             <div className="modal-acciones modal-acciones-compactas">
               <button className="btn-secundario" onClick={() => setDetalle(null)}>Cerrar</button>
               {detalle.pdf_url && (
-                <a
+                <button
                   className="btn-secundario"
-                  href={detalle.pdf_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  download
+                  onClick={() => abrirPdf(detalle.pdf_url).catch((e) => setErrorDescarga(e instanceof Error ? e.message : 'No se pudo abrir el PDF.'))}
                   title="El PDF tal como se guardó cuando se hizo la recepción"
                 >
                   Ver formato
-                </a>
+                </button>
               )}
               <button
                 className="btn-primary"

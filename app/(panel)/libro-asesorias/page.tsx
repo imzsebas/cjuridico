@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase'; // ajusta la ruta si tu cliente está en otro lugar
+import { abrirPdf, rutaDePdf } from '@/lib/pdfPrivado';
 import PanelTopbar from '@/components/PanelTopbar';
 import ExcelJS from 'exceljs';
 import Paginacion, { POR_PAGINA } from '@/components/Paginacion';
@@ -263,7 +264,7 @@ export default function LibroAsesoriasPage() {
 
     const id = detalle.id_recepcion;
     const numero = detalle.asesoria_no;
-    const rutaPdf = detalle.pdf_url ? decodeURIComponent(detalle.pdf_url.split('/recepciones/').pop() ?? '') : '';
+    const rutaPdf = rutaDePdf(detalle.pdf_url);
 
     const { data, error } = await supabase.from('recepciones').delete().eq('id', id).select('id');
     if (error) {
@@ -628,16 +629,13 @@ export default function LibroAsesoriasPage() {
                   )}
                   <button className="btn-secundario" onClick={cerrarDetalle}>Cerrar</button>
                   {detalle.pdf_url && (
-                    <a
+                    <button
                       className="btn-secundario"
-                      href={detalle.pdf_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      download
+                      onClick={() => abrirPdf(detalle.pdf_url).catch((e) => setErrorDescarga(e instanceof Error ? e.message : 'No se pudo abrir el PDF.'))}
                       title="El PDF tal como se guardó cuando se hizo la recepción"
                     >
                       Ver formato
-                    </a>
+                    </button>
                   )}
                   <button
                     className="btn-secundario"

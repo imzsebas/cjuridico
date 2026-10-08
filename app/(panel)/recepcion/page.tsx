@@ -135,13 +135,12 @@ export default function RecepcionPage() {
 
       // 1. Si escribió un número, que no se repita
       if (numero) {
-        const { data: repetida, error: errorRepetida } = await supabase
-          .from('recepciones')
-          .select('id')
-          .eq('asesoria_no', numero)
-          .limit(1);
+        // La consulta pasa por una función de la base: el monitor solo puede leer sus propias
+        // recepciones, pero el número no debe repetirse entre todas.
+        const { data: yaExiste, error: errorRepetida } = await supabase
+          .rpc('numero_asesoria_existe', { p_numero: numero });
         if (errorRepetida) throw errorRepetida;
-        if (repetida && repetida.length > 0) {
+        if (yaExiste) {
           irAPaso(0);
           throw new Error(`Ya existe una asesoría con el N.º ${numero}. Revisa el número.`);
         }
@@ -162,7 +161,6 @@ export default function RecepcionPage() {
       const { error: errorSubida } = await supabase.storage.from('recepciones').upload(nombreArchivo, blob);
       if (errorSubida) throw errorSubida;
       archivoSubido = nombreArchivo;
-      const { data: urlData } = supabase.storage.from('recepciones').getPublicUrl(nombreArchivo);
 
       // 4. Separar los datos: columnas individuales vs JSON "detalles"
       const individuales: Record<string, unknown> = {};
@@ -174,7 +172,7 @@ export default function RecepcionPage() {
       const { error: errorInsert } = await supabase.from('recepciones').insert({
         ...individuales,
         detalles,
-        pdf_url: urlData.publicUrl,
+        pdf_url: nombreArchivo, // el bucket es privado: se guarda solo la ruta del archivo
         monitor_id: user?.id,
       });
       if (errorInsert) throw errorInsert;
