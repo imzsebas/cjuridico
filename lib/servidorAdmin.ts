@@ -28,12 +28,8 @@ export async function exigirAdministrador(
   const { data, error } = await admin.auth.getUser(token);
   if (error || !data.user) return { error: json({ error: 'Sesión no válida.' }, 401) };
 
-  const { data: perfil, error: errPerfil } = await admin.from('usuarios').select('rol').eq('id', data.user.id).single();
-  if (perfil?.rol !== 'administrador') {
-    // DIAGNÓSTICO TEMPORAL: quitar cuando se resuelva. No muestra la clave, solo su tipo.
-    const diag = `clave del servidor: ${tipoDeClave(process.env.SUPABASE_SERVICE_ROLE_KEY)}; rol leído: ${perfil?.rol ?? 'ninguno'}; error: ${errPerfil?.message ?? 'ninguno'}`;
-    return { error: json({ error: `Solo el administrador puede hacer esto. [${diag}]` }, 403) };
-  }
+  const { data: perfil } = await admin.from('usuarios').select('rol').eq('id', data.user.id).single();
+  if (perfil?.rol !== 'administrador') return { error: json({ error: 'Solo el administrador puede hacer esto.' }, 403) };
 
   return { admin, userId: data.user.id };
 }
@@ -44,16 +40,3 @@ export const MIN_PASSWORD = 6; // igual que el formulario de inicio de sesión
 
 // Bloqueo prácticamente permanente (≈100 años) para quien pierde el rol.
 export const BLOQUEO = '876000h';
-
-// Solo para el diagnóstico temporal: indica qué tipo de clave se está usando (sin revelarla).
-function tipoDeClave(k?: string): string {
-  if (!k) return 'no configurada';
-  if (k.startsWith('sb_secret_')) return 'sb_secret (nueva, correcta)';
-  if (k.startsWith('sb_publishable_')) return 'sb_publishable (INCORRECTA: es la pública)';
-  try {
-    const rol = JSON.parse(Buffer.from(k.split('.')[1], 'base64url').toString()).role;
-    return rol === 'service_role' ? 'service_role (correcta)' : `${rol} (INCORRECTA)`;
-  } catch {
-    return 'formato desconocido';
-  }
-}

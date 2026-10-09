@@ -288,9 +288,9 @@ export default function EstudiantesPage() {
             )}
           </div>
 
-          <div className="modal-acciones">
+          <div className="modal-acciones modal-acciones-compactas">
+            <button className="btn-secundario btn-eliminar acciones-izquierda" onClick={() => eliminar(detalle.id)}>Eliminar</button>
             <button className="btn-secundario" onClick={() => setDetalle(null)}>Cerrar</button>
-            <button className="btn-secundario btn-eliminar" onClick={() => eliminar(detalle.id)}>Eliminar</button>
             <button className="btn-primary" onClick={() => abrirEditar(detalle)}>Editar</button>
           </div>
         </div>
@@ -347,7 +347,7 @@ export default function EstudiantesPage() {
             </div>
           </div>
 
-          <div className="modal-acciones">
+          <div className="modal-acciones modal-acciones-compactas">
             <button className="btn-secundario" onClick={() => setModal(null)}>Cancelar</button>
             <button className="btn-primary" onClick={guardar} disabled={guardando}>
               {guardando ? 'Guardando...' : 'Guardar'}

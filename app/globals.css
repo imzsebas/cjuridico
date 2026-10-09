@@ -1204,3 +1204,26 @@ a.btn-secundario { display: flex; align-items: center; justify-content: center; 
   width: 100%;
   margin-top: 10px;
 }
+
+/* ---------- Modales más amplios y con más aire (Monitores) ---------- */
+.modal-card-medio { max-width: 560px; }
+.modal-card-amplio { max-width: 780px; }
+.modal-card-holgado .modal-card-cuerpo { padding: 34px 38px; }
+.modal-card-holgado .modal-card h3,
+.modal-card-holgado h3 { margin-bottom: 22px; }
+.modal-card-holgado .field { margin-bottom: 1.35rem; }
+.modal-card-holgado .texto-secundario { margin: -10px 0 22px; line-height: 1.55; }
+.modal-card-holgado .caso-seccion-titulo { margin: 24px 0 14px; }
+.modal-card-holgado .cred-lista { gap: 14px; }
+.modal-card-holgado .cred-fila { padding: 16px; gap: 10px; }
+.modal-card-holgado .lista-estudiantes { max-height: 340px; }
+.modal-card-holgado .modal-acciones { padding: 14px 38px; }
+.caso-encabezado h3, .modal-card h3 { min-width: 0; overflow-wrap: anywhere; }
+.monitor-datos { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 28px; }
+.monitor-datos .caso-dato:first-child { grid-column: 1 / -1; }
+.monitor-datos .caso-dato span { margin-bottom: 4px; letter-spacing: 0.04em; text-transform: uppercase; font-size: 10.5px; }
+@media (max-width: 560px) {
+  .modal-card-holgado .modal-card-cuerpo { padding: 24px 22px; }
+  .monitor-datos { grid-template-columns: 1fr; }
+  .modal-card-holgado .modal-acciones { padding: 12px 22px; }
+}

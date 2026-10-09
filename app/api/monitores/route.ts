@@ -14,19 +14,38 @@ export async function GET(req: NextRequest) {
     .order('creado_en', { ascending: false });
   if (error) return json({ error: error.message }, 500);
 
+  type Ficha = { id: string; nombre_estudiante: string; codigo_estudiante: string; nivel_consultorio: string; correo_estudiante: string | null };
+  const cols = 'id, nombre_estudiante, codigo_estudiante, nivel_consultorio, correo_estudiante';
+
+  // 1) Fichas vinculadas explícitamente
   const ids = (usuarios ?? []).map((u) => u.id_estudiante).filter((x): x is string => !!x);
-  const fichas = new Map<string, { nombre_estudiante: string; codigo_estudiante: string; nivel_consultorio: string }>();
+  const porId = new Map<string, Ficha>();
   if (ids.length > 0) {
-    const { data: est, error: errEst } = await admin
-      .from('estudiantes')
-      .select('id, nombre_estudiante, codigo_estudiante, nivel_consultorio')
-      .in('id', ids);
+    const { data: est, error: errEst } = await admin.from('estudiantes').select(cols).in('id', ids);
     if (errEst) return json({ error: errEst.message }, 500);
-    (est ?? []).forEach((e) => fichas.set(e.id, e));
+    (est ?? []).forEach((e) => porId.set(e.id, e));
+  }
+
+  // 2) Monitores creados a mano (sin vínculo): se busca su ficha por el correo, solo para mostrar el nombre.
+  //    No se guarda nada; si dos estudiantes comparten correo, no se adivina.
+  const porCorreo = new Map<string, Ficha | null>();
+  if ((usuarios ?? []).some((u) => !u.id_estudiante)) {
+    const TAM = 1000;
+    for (let desde = 0; ; desde += TAM) {
+      const { data: lote, error: errLote } = await admin
+        .from('estudiantes').select(cols).order('id').range(desde, desde + TAM - 1);
+      if (errLote) return json({ error: errLote.message }, 500);
+      (lote ?? []).forEach((e) => {
+        const c = (e.correo_estudiante ?? '').trim().toLowerCase();
+        if (!c) return;
+        porCorreo.set(c, porCorreo.has(c) ? null : e);
+      });
+      if ((lote?.length ?? 0) < TAM) break;
+    }
   }
 
   const monitores = (usuarios ?? []).map((u) => {
-    const f = u.id_estudiante ? fichas.get(u.id_estudiante) : undefined;
+    const f = u.id_estudiante ? porId.get(u.id_estudiante) : porCorreo.get((u.correo ?? '').trim().toLowerCase()) ?? undefined;
     return {
       id: u.id,
       correo: u.correo,

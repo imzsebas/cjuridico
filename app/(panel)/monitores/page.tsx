@@ -397,24 +397,24 @@ export default function MonitoresPage() {
       {/* Detalle del monitor: desde aquí se editan las credenciales o se quita el rol */}
       {detalle && (
         <div className="modal-overlay" onClick={() => setDetalle(null)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-card modal-card-medio modal-card-holgado" onClick={(e) => e.stopPropagation()}>
             <div className="modal-card-cuerpo">
               <div className="caso-encabezado"><h3>{detalle.nombre ?? detalle.correo}</h3></div>
-              <div className="caso-datos">
+              <div className="caso-datos monitor-datos">
                 <div className="caso-dato"><span>Correo de ingreso</span><p>{detalle.correo}</p></div>
                 <div className="caso-dato"><span>Código</span><p>{detalle.codigo || '—'}</p></div>
                 <div className="caso-dato"><span>Nivel de consultorio</span><p>{detalle.nivel || '—'}</p></div>
                 <div className="caso-dato"><span>Monitor desde</span><p>{fechaCorta(detalle.creado_en)}</p></div>
               </div>
             </div>
-            <div className="modal-acciones">
-              <button className="btn-secundario" onClick={() => setDetalle(null)}>Cerrar</button>
+            <div className="modal-acciones modal-acciones-compactas">
               <button
-                className="btn-secundario btn-eliminar"
+                className="btn-secundario btn-eliminar acciones-izquierda"
                 onClick={() => { setQuitando(detalle); setDetalle(null); }}
               >
                 Quitar rol
               </button>
+              <button className="btn-secundario" onClick={() => setDetalle(null)}>Cerrar</button>
               <button
                 className="btn-primary"
                 onClick={() => { setEditando({ monitor: detalle, correo: detalle.correo, password: '' }); setDetalle(null); }}
@@ -429,7 +429,7 @@ export default function MonitoresPage() {
       {/* Editar credenciales */}
       {editando && (
         <div className="modal-overlay" onClick={() => !trabajando && setEditando(null)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-card modal-card-medio modal-card-holgado" onClick={(e) => e.stopPropagation()}>
             <div className="modal-card-cuerpo">
               <h3>Editar credenciales</h3>
               <p className="texto-secundario">{editando.monitor.nombre ?? editando.monitor.correo}</p>
@@ -460,7 +460,7 @@ export default function MonitoresPage() {
                 </div>
               </div>
             </div>
-            <div className="modal-acciones">
+            <div className="modal-acciones modal-acciones-compactas">
               <button className="btn-secundario" onClick={() => setEditando(null)} disabled={trabajando}>Cancelar</button>
               <button className="btn-primary" onClick={guardarCredenciales} disabled={trabajando}>
                 {trabajando ? 'Guardando...' : 'Guardar'}
@@ -473,7 +473,7 @@ export default function MonitoresPage() {
       {/* Confirmar quitar rol */}
       {quitando && (
         <div className="modal-overlay" onClick={() => !trabajando && setQuitando(null)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-card modal-card-medio modal-card-holgado" onClick={(e) => e.stopPropagation()}>
             <div className="modal-card-cuerpo">
               <h3>Quitar rol de monitor</h3>
               <p className="texto-secundario" style={{ margin: '0 0 12px' }}>
@@ -484,9 +484,9 @@ export default function MonitoresPage() {
               </p>
               {errorModal && <div className="form-message error">{errorModal}</div>}
             </div>
-            <div className="modal-acciones">
+            <div className="modal-acciones modal-acciones-compactas">
               <button className="btn-secundario" onClick={() => setQuitando(null)} disabled={trabajando}>Cancelar</button>
-              <button className="btn-primary" onClick={confirmarQuitar} disabled={trabajando}>
+              <button className="btn-peligro" onClick={confirmarQuitar} disabled={trabajando}>
                 {trabajando ? 'Quitando...' : 'Quitar rol'}
               </button>
             </div>
@@ -497,7 +497,7 @@ export default function MonitoresPage() {
       {/* Asignar monitores (varios a la vez) */}
       {asignando && (
         <div className="modal-overlay" onClick={cerrarAsignar}>
-          <div className="modal-card modal-card-ancho" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-card modal-card-amplio modal-card-holgado" onClick={(e) => e.stopPropagation()}>
             <div className="modal-card-cuerpo">
               <h3>Asignar monitores</h3>
               <p className="texto-secundario">
@@ -628,7 +628,7 @@ export default function MonitoresPage() {
               )}
             </div>
 
-            <div className="modal-acciones">
+            <div className="modal-acciones modal-acciones-compactas">
               {nuevo ? (
                 <>
                   <button className="btn-secundario" onClick={() => { setNuevo(null); setErrorModal(null); }} disabled={trabajando}>Volver a la lista</button>
