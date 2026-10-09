@@ -1132,3 +1132,75 @@ a.btn-secundario { display: flex; align-items: center; justify-content: center; 
   background: #fbeceb; border: 1px solid #e7c3bf; color: #8a2a24; border-radius: 10px;
   padding: 10px 12px; font-size: 13.5px; line-height: 1.45; margin-bottom: 12px;
 }
+/* ---------- Monitores: credenciales de ingreso en el modal de asignación ---------- */
+
+.estudiante-fila-simple {
+  grid-template-columns: 18px minmax(0, 1fr) auto auto;
+}
+
+.cred-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 300px;
+  overflow-y: auto;
+  margin-bottom: 4px;
+}
+
+.cred-fila {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #e3ede6;
+  border-radius: 10px;
+  background: #fbfdfb;
+}
+
+.cred-fila-nombre {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.cred-fila input,
+.cred-con-boton input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1.5px solid #dfe7e1;
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 0.9rem;
+  color: var(--green-900);
+  background: var(--white);
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.cred-fila input:focus,
+.cred-con-boton input:focus {
+  border-color: var(--green-700);
+  box-shadow: 0 0 0 3px rgba(31, 92, 66, 0.1);
+}
+
+.cred-con-boton {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.cred-con-boton .btn-secundario {
+  width: auto;
+  flex-shrink: 0;
+  padding: 0 14px;
+}
+
+.cred-error {
+  font-size: 0.8rem;
+  color: #b3261e;
+}
+
+.cred-nuevo-btn {
+  width: 100%;
+  margin-top: 10px;
+}

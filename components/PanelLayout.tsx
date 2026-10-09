@@ -20,6 +20,9 @@ const ICONOS = {
   estudiantes: (
     <svg viewBox="0 0 18 18" fill="none" width="18" height="18"><circle cx="9" cy="7" r="3" stroke="currentColor" strokeWidth="1.5" /><path d="M3 16c0-2.761 2.686-5 6-5s6 2.239 6 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
   ),
+  monitores: (
+    <svg viewBox="0 0 18 18" fill="none" width="18" height="18"><circle cx="7" cy="6" r="3" stroke="currentColor" strokeWidth="1.5" /><path d="M1 16c0-3.314 2.686-6 6-6h1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /><rect x="10.5" y="10.5" width="6" height="5" rx="1.2" stroke="currentColor" strokeWidth="1.5" /><path d="M12 10.5V9.5a1.5 1.5 0 013 0v1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
+  ),
   historial: (
     <svg viewBox="0 0 18 18" fill="none" width="18" height="18"><circle cx="9" cy="9" r="7" stroke="currentColor" strokeWidth="1.5" /><path d="M9 5v4l2.5 1.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
   ),
@@ -30,6 +33,7 @@ const ENLACES = [
   { href: '/asignacion', label: 'Asignación', corto: 'Asignación', grupo: 'Gestión', icono: ICONOS.asignacion, roles: ['administrador'] },
   { href: '/libro-asesorias', label: 'Libro de asesorías', corto: 'Libro', grupo: 'Registros', icono: ICONOS.libro, roles: ['administrador'] },
   { href: '/estudiantes', label: 'Estudiantes', corto: 'Estudiantes', grupo: 'Registros', icono: ICONOS.estudiantes, roles: ['administrador'] },
+  { href: '/monitores', label: 'Monitores', corto: 'Monitores', grupo: 'Registros', icono: ICONOS.monitores, roles: ['administrador'] },
   { href: '/mis-recepciones', label: 'Mis recepciones', corto: 'Historial', grupo: 'Registros', icono: ICONOS.historial, roles: ['monitor'] },
 ];
 
