@@ -665,16 +665,13 @@ export default function LibroAsesoriasPage() {
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-card-cuerpo">
               <h3>Eliminar registro</h3>
-              <div className="aviso-peligro">
-                <strong>Advertencia:</strong> esta acción borrará todo lo relacionado a este registro (los datos de la
-                asesoría, el estudiante asignado y el PDF guardado). No se puede deshacer.
-              </div>
               <p className="texto-secundario" style={{ margin: '0 0 14px' }}>
                 Asesoría N° {detalle.asesoria_no || 'sin número'} · {detalle.nombres_apellidos || 'sin nombre'}
               </p>
               <div className="field">
                 <label htmlFor="frase-eliminar">
-                  Para confirmar, escribe <strong>{FRASE_ELIMINAR}</strong> (no se puede copiar ni pegar)
+                  Para confirmar, escribe <strong>{FRASE_ELIMINAR}</strong> (esta acción borrará todo lo relacionado a este registro: los datos de la
+                asesoría, el estudiante asignado y el PDF guardado)
                 </label>
                 <input
                   id="frase-eliminar"
