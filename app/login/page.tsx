@@ -18,11 +18,18 @@ export default function LoginPage() {
 
     const { data, error } = await supabase.auth.signInWithPassword({ email: correo, password });
     if (error) {
-      // Un monitor al que se le quitó el rol tiene la cuenta bloqueada: se explica en español.
+      // Los errores de Supabase vienen en inglés: se traducen los más comunes.
+      // - Correo o contraseña mal escritos (o correo que no existe): mismo mensaje en ambos casos.
+      // - Un monitor al que se le quitó el rol tiene la cuenta bloqueada.
+      const credencialesInvalidas = /invalid login credentials/i.test(error.message);
       const bloqueada = /banned/i.test(error.message);
       setMessage({
         type: 'error',
-        text: bloqueada ? 'Esta cuenta ya no tiene acceso. Comunícate con el administrador.' : error.message,
+        text: credencialesInvalidas
+          ? 'Correo o contraseña incorrectos.'
+          : bloqueada
+            ? 'Esta cuenta ya no tiene acceso. Comunícate con el administrador.'
+            : error.message,
       });
       setLoading(false);
       return;
