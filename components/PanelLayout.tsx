@@ -4,6 +4,7 @@ import { ReactNode, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import ModalReparto from '@/components/ModalReparto';
 
 type Rol = 'administrador' | 'monitor' | string;
 
@@ -13,6 +14,9 @@ const ICONOS = {
   ),
   asignacion: (
     <svg viewBox="0 0 18 18" fill="none" width="18" height="18"><circle cx="7" cy="6" r="3" stroke="currentColor" strokeWidth="1.5" /><path d="M1 16c0-3.314 2.686-6 6-6h2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /><path d="M11.5 13.5l1.5 1.5 3-3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+  ),
+  reparto: (
+    <svg viewBox="0 0 18 18" fill="none" width="18" height="18"><rect x="2" y="2.5" width="5.5" height="5.5" rx="1.2" stroke="currentColor" strokeWidth="1.5" /><rect x="10.5" y="2.5" width="5.5" height="5.5" rx="1.2" stroke="currentColor" strokeWidth="1.5" /><rect x="2" y="10" width="5.5" height="5.5" rx="1.2" stroke="currentColor" strokeWidth="1.5" /><path d="M10.5 12.75h5.5M13.25 10v5.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
   ),
   libro: (
     <svg viewBox="0 0 18 18" fill="none" width="18" height="18"><path d="M3 3.5A1.5 1.5 0 014.5 2H15v12H4.5A1.5 1.5 0 003 15.5v-12z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" /><path d="M3 15.5A1.5 1.5 0 004.5 17H15" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
@@ -28,9 +32,20 @@ const ICONOS = {
   ),
 };
 
-const ENLACES = [
+type Enlace = {
+  href?: string; // si no tiene href, es un botón que ejecuta una acción
+  accion?: 'reparto';
+  label: string;
+  corto: string;
+  grupo: string;
+  icono: ReactNode;
+  roles: string[];
+};
+
+const ENLACES: Enlace[] = [
   { href: '/recepcion', label: 'Recepción', corto: 'Recepción', grupo: 'Gestión', icono: ICONOS.recepcion, roles: ['administrador', 'monitor'] },
-  { href: '/asignacion', label: 'Asignación', corto: 'Asignación', grupo: 'Gestión', icono: ICONOS.asignacion, roles: ['administrador'] },
+  { href: '/asignacion', label: 'Asignar', corto: 'Asignar', grupo: 'Asignaciones', icono: ICONOS.asignacion, roles: ['administrador'] },
+  { accion: 'reparto', label: 'Generar reparto', corto: 'Reparto', grupo: 'Asignaciones', icono: ICONOS.reparto, roles: ['administrador'] },
   { href: '/libro-asesorias', label: 'Libro de asesorías', corto: 'Libro', grupo: 'Registros', icono: ICONOS.libro, roles: ['administrador'] },
   { href: '/estudiantes', label: 'Estudiantes', corto: 'Estudiantes', grupo: 'Registros', icono: ICONOS.estudiantes, roles: ['administrador'] },
   { href: '/monitores', label: 'Monitores', corto: 'Monitores', grupo: 'Registros', icono: ICONOS.monitores, roles: ['administrador'] },
@@ -49,6 +64,7 @@ export default function PanelLayout({ children }: { children: ReactNode }) {
   const [rol, setRol] = useState<Rol | null>(null);
   const [correo, setCorreo] = useState('');
   const [menuAbierto, setMenuAbierto] = useState(false);
+  const [repartoAbierto, setRepartoAbierto] = useState(false);
 
   useEffect(() => {
     let cancelado = false;
@@ -96,12 +112,19 @@ export default function PanelLayout({ children }: { children: ReactNode }) {
           {grupos.map((grupo, i) => (
             <div key={grupo}>
               <span className="panel-nav-label" style={i > 0 ? { marginTop: '1rem' } : undefined}>{grupo}</span>
-              {items.filter((it) => it.grupo === grupo).map((it) => (
-                <Link key={it.href} href={it.href} className={`panel-nav-item ${pathname === it.href ? 'active' : ''}`}>
-                  {it.icono}
-                  <span className="panel-nav-text">{it.label}</span>
-                </Link>
-              ))}
+              {items.filter((it) => it.grupo === grupo).map((it) =>
+                it.href ? (
+                  <Link key={it.href} href={it.href} className={`panel-nav-item ${pathname === it.href ? 'active' : ''}`}>
+                    {it.icono}
+                    <span className="panel-nav-text">{it.label}</span>
+                  </Link>
+                ) : (
+                  <button key={it.accion} type="button" className="panel-nav-item" onClick={() => setRepartoAbierto(true)}>
+                    {it.icono}
+                    <span className="panel-nav-text">{it.label}</span>
+                  </button>
+                )
+              )}
             </div>
           ))}
         </nav>
@@ -157,15 +180,24 @@ export default function PanelLayout({ children }: { children: ReactNode }) {
       {/* ── MENÚ INFERIOR (móvil) ── */}
       <nav className="panel-bottom-nav">
         <div className="panel-bottom-nav-inner">
-          {items.map((it) => (
-            <Link key={it.href} href={it.href} className={`panel-bottom-nav-item ${pathname === it.href ? 'active' : ''}`}>
-              <span className="panel-bottom-nav-icon">{it.icono}</span>
-              <span className="panel-bottom-nav-label">{it.corto}</span>
-            </Link>
-          ))}
+          {items.map((it) =>
+            it.href ? (
+              <Link key={it.href} href={it.href} className={`panel-bottom-nav-item ${pathname === it.href ? 'active' : ''}`}>
+                <span className="panel-bottom-nav-icon">{it.icono}</span>
+                <span className="panel-bottom-nav-label">{it.corto}</span>
+              </Link>
+            ) : (
+              <button key={it.accion} type="button" className="panel-bottom-nav-item" onClick={() => setRepartoAbierto(true)}>
+                <span className="panel-bottom-nav-icon">{it.icono}</span>
+                <span className="panel-bottom-nav-label">{it.corto}</span>
+              </button>
+            )
+          )}
         </div>
       </nav>
 
+
+      {repartoAbierto && <ModalReparto onCerrar={() => setRepartoAbierto(false)} />}
     </div>
   );
 }

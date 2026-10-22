@@ -1227,3 +1227,110 @@ a.btn-secundario { display: flex; align-items: center; justify-content: center; 
   .monitor-datos { grid-template-columns: 1fr; }
   .modal-card-holgado .modal-acciones { padding: 12px 22px; }
 }
+
+/* ---------- Asignar: bloques por estudiante, historial en rojo y modal ---------- */
+.form-message.success { background: #eaf5ee; border: 1.5px solid #bfe0cb; color: var(--green-700); }
+
+.asig-tabla td { vertical-align: middle; }
+/* Filas más angostas: menos relleno vertical y altura de texto ajustada */
+.panel-shell .admin-table.admin-table-compacta.asig-tabla td { padding: 3px 12px; line-height: 1.3; }
+.panel-shell .admin-table.admin-table-compacta.asig-tabla th { padding: 8px 12px; }
+.admin-table tr.asig-inicio-bloque td { border-top: 2px solid #c9dccf; }
+.admin-table tr.asig-inicio-bloque:first-child td { border-top: none; }
+.asig-codigo { white-space: nowrap; color: var(--gray-600); font-variant-numeric: tabular-nums; }
+.asig-num { white-space: nowrap; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.asig-nombre {
+  background: none; border: none; padding: 0; margin: 0; font: inherit; font-weight: 600;
+  color: var(--green-700); text-align: left; cursor: pointer; text-decoration: none;
+}
+.asig-nombre:hover { color: var(--green-900); }
+
+.asig-asunto { max-width: 280px; }
+.asig-asunto div { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+.asig-obs { min-width: 200px; }
+.asig-obs-input {
+  display: block; width: 100%; min-height: 24px; resize: none; border: 1px solid transparent; border-radius: 6px;
+  background: transparent; font: inherit; line-height: 1.3; color: inherit; padding: 2px 6px; field-sizing: content;
+}
+.asig-obs-input:hover { border-color: #d7e6db; }
+.asig-obs-input:focus { outline: none; border-color: var(--green-500); background: var(--white); box-shadow: 0 0 0 3px rgba(63, 133, 98, 0.15); color: var(--ink); }
+.asig-obs-input::placeholder { color: #9aa8a1; font-style: italic; }
+
+.asig-fecha { white-space: nowrap; }
+.asig-fecha span { margin-right: 8px; }
+.asig-quitar {
+  display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0;
+  border: 1px solid transparent; border-radius: 6px; background: none; color: #9aa8a1; cursor: pointer; vertical-align: middle;
+}
+.asig-quitar:hover { color: #b3261e; background: #fbeceb; border-color: #e7c3bf; }
+
+/* Historial: columnas 3 a 6 (N°, área, asunto, observaciones) en rojo; código, nombre y fecha no */
+.admin-table tr td.asig-historial { color: #b3261e; background: #fdf3f2; }
+.admin-table tr:hover td.asig-historial { background: #fbe6e4; }
+
+/* Colores alternados por estudiante (bloque), para no confundir filas */
+.admin-table tr.asig-par td { background: #edf5f0; }
+.admin-table tr.asig-par:hover td { background: #e1eee6; }
+.admin-table tr.asig-par td.asig-historial { background: #fbe9e7; }
+.admin-table tr.asig-par:hover td.asig-historial { background: #fbe6e4; }
+.asig-par .asig-obs-input:focus { background: var(--white); }
+.asig-historial .asig-obs-input::placeholder { color: #d49a95; }
+.asig-historial .asig-obs-input:focus { color: var(--ink); }
+
+/* Modal de asignar */
+.asig-ayuda { margin: 6px 0 0; font-size: 12px; color: var(--gray-600); }
+.asig-ayuda-error { color: #b3261e; }
+.asig-textarea {
+  width: 100%; padding: 10px 12px; border: 1.5px solid #d7e6db; border-radius: 10px; font: inherit; font-size: 0.92rem; resize: vertical;
+}
+.asig-textarea:focus { outline: none; border-color: var(--green-500); box-shadow: 0 0 0 3px rgba(63, 133, 98, 0.15); }
+.field input[type="date"] { font-family: inherit; }
+
+.asig-datos-asesoria {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; margin: 0 0 1.1rem;
+  padding: 12px 14px; background: var(--green-100); border-radius: 10px;
+}
+.asig-datos-asesoria .largo { grid-column: 1 / -1; }
+.asig-datos-asesoria span { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--gray-600); }
+.asig-datos-asesoria strong { font-weight: 500; font-size: 0.9rem; }
+
+.asig-aviso {
+  margin: 0 0 1rem; padding: 12px 14px; border-radius: 10px; font-size: 0.88rem;
+  background: var(--gold-100); border: 1.5px solid #e2d3a8; color: #5c4719;
+}
+.asig-aviso ul { margin: 6px 0; padding-left: 18px; }
+.asig-aviso li span { color: #7d6828; }
+.asig-aviso p { margin: 6px 0 0; font-size: 0.84rem; }
+
+.asig-opciones { display: flex; flex-direction: column; gap: 6px; }
+.asig-opcion {
+  display: flex; align-items: center; gap: 10px; padding: 9px 12px; margin: 0;
+  border: 1.5px solid #d7e6db; border-radius: 10px; cursor: pointer; font-size: 0.9rem;
+}
+.asig-opcion.elegida { border-color: var(--green-500); background: var(--green-100); }
+.asig-opcion-fecha { margin-left: auto; font-size: 12px; color: var(--gray-600); }
+
+@media (max-width: 560px) {
+  .asig-datos-asesoria { grid-template-columns: 1fr; }
+}
+
+/* Botones del menú que no navegan (Generar reparto abre un modal) */
+button.panel-nav-item { appearance: none; -webkit-appearance: none; background: none; border: none; font: inherit; }
+button.panel-bottom-nav-item { appearance: none; -webkit-appearance: none; background: none; border: none; font: inherit; }
+
+/* Modal de generar reparto */
+.rep-modos { display: flex; gap: 8px; margin-bottom: 1.1rem; }
+.rep-modo {
+  flex: 1; padding: 9px 12px; border: 1.5px solid #d7e6db; border-radius: 10px; background: var(--white);
+  font: inherit; font-size: 0.88rem; font-weight: 600; color: var(--green-900); cursor: pointer;
+  appearance: none; -webkit-appearance: none; transition: background 0.15s ease;
+}
+.rep-modo:hover { background: var(--green-100); }
+.rep-modo.activo:hover { background: var(--green-700); }
+.rep-modo.activo { background: var(--green-700); border-color: var(--green-700); color: var(--white); }
+.rep-fechas { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.rep-fechas .field { margin-bottom: 0; }
+.rep-fechas.una { grid-template-columns: 1fr; }
+.rep-nota { margin: 12px 0 0; font-size: 0.84rem; color: var(--gray-600); }
