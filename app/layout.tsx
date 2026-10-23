@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Consultorio Juridico",
-  description: "Recepción de asesorías",
+  title: "THEMIS",
+  description: "Consultorio Judídico",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

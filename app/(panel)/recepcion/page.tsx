@@ -10,7 +10,7 @@ import {
   CAMPOS_INDIVIDUALES, Medidor, Valores, aMayusculas, crearMedidor, descargarArchivo,
   generarPdfRecepcion, partirEnLineas,
 } from '@/lib/formatoRecepcion';
-import { HECHOS, SECCIONES, SIN_SELECCION, SIN_TEXTO, completarEnBlanco, revisarFormulario } from '@/lib/estructuraRecepcion';
+import { DISCAPACIDADES, HECHOS, SECCIONES, SIN_SELECCION, SIN_TEXTO, completarEnBlanco, revisarFormulario } from '@/lib/estructuraRecepcion';
 
 const ULTIMO_PASO = SECCIONES.length - 1;
 
@@ -30,7 +30,7 @@ export default function RecepcionPage() {
   const [paso, setPaso] = useState(0);
   const [aviso, setAviso] = useState(false); // ventana de "hay espacios sin llenar"
   const [guardando, setGuardando] = useState(false);
-  const [mensaje, setMensaje] = useState<{ tipo: 'error' | 'success'; texto: string } | null>(null);
+  const [mensaje, setMensaje] = useState<{ tipo: 'error' | 'success'; titulo: string; texto: string } | null>(null);
   const [guardado, setGuardado] = useState<{ numero: string; bytes: Uint8Array; nombreArchivo: string } | null>(null);
 
   const set = useCallback((k: string, v: string) => setValores((p) => ({ ...p, [k]: v })), []);
@@ -40,6 +40,16 @@ export default function RecepcionPage() {
   // Espacios en blanco de cada sección (sirve para el check de los pasos y para la advertencia)
   const faltantes: string[][] = useMemo(() => revisarFormulario(valores), [valores]);
   const totalFaltantes = faltantes.reduce((suma: number, lista: string[]) => suma + lista.length, 0);
+
+  // Barra de progreso: usa la misma revisión que genera el aviso de "espacios sin llenar",
+  // así que llega al 100 % justo cuando ya no queda nada por llenar.
+  const totalEspacios = useMemo(
+    () => revisarFormulario(valoresIniciales()).reduce((suma: number, lista: string[]) => suma + lista.length, 0),
+    [],
+  );
+  const progreso = totalEspacios > 0
+    ? Math.min(100, Math.max(0, Math.round(((totalEspacios - totalFaltantes) / totalEspacios) * 100)))
+    : 0;
 
   // Solo monitores o administradores pueden entrar aquí
   useEffect(() => {
@@ -82,11 +92,13 @@ export default function RecepcionPage() {
   function solicitarGuardado() {
     setMensaje(null);
 
-    // Obligatorios: nombre del usuario, estudiante que recepciona, hecho 1, área de derecho,
-    // naturaleza del asunto y reparto (con o sin). `lleno` dice si el campo ya está diligenciado.
+    // Obligatorios: nombre del usuario, tipo de discapacidad (si respondió SI), estudiante que recepciona,
+    // hecho 1, área de derecho, naturaleza del asunto y reparto (con o sin).
+    // `lleno` dice si el campo ya está diligenciado.
     const lleno = (k: string) => Boolean(valores[k]?.trim());
     const obligatorios: { ok: boolean; texto: string; paso: number }[] = [
       { ok: lleno('nombres_apellidos'), texto: 'el nombre del usuario (sección 1)', paso: 0 },
+      { ok: !lleno('discapacidad_si') || DISCAPACIDADES.some((d) => lleno(d.k)), texto: 'el tipo de discapacidad (sección 1)', paso: 0 },
       { ok: lleno('estudiante_recepciona_nombre'), texto: 'el nombre del estudiante que recepciona (sección 6)', paso: ULTIMO_PASO },
       { ok: lleno('sintesis_hecho_1'), texto: 'el hecho 1 (sección 6)', paso: ULTIMO_PASO },
       { ok: lleno('area_derecho'), texto: 'el área de derecho (sección 6)', paso: ULTIMO_PASO },
@@ -97,7 +109,7 @@ export default function RecepcionPage() {
     if (sinLlenar.length) {
       const textos = sinLlenar.map((o) => o.texto);
       const lista = textos.length > 1 ? `${textos.slice(0, -1).join(', ')} y ${textos[textos.length - 1]}` : textos[0];
-      setMensaje({ tipo: 'error', texto: `Falta completar ${lista}.` });
+      setMensaje({ tipo: 'error', titulo: 'Faltan datos obligatorios', texto: `Falta completar ${lista}.` });
       irAPaso(sinLlenar[0].paso);
       return;
     }
@@ -190,16 +202,50 @@ export default function RecepcionPage() {
         : typeof err === 'object' && err && 'message' in err
           ? String((err as { message: unknown }).message)
           : 'Ocurrió un error al guardar.';
-      setMensaje({ tipo: 'error', texto });
+      setMensaje({ tipo: 'error', titulo: 'No se pudo guardar', texto });
     } finally {
       setGuardando(false);
       setAviso(false);
     }
   }
 
+  // Botones del encabezado (fuera del <form>, por eso usan onClick y no type="submit")
+  const acciones = (
+    <div className="rf-acciones">
+      <button type="button" className="cp-add-btn secundario" disabled={paso === 0 || guardando} onClick={() => irAPaso(paso - 1)}>
+        Anterior
+      </button>
+      {paso < ULTIMO_PASO ? (
+        <button type="button" className="cp-add-btn" onClick={() => irAPaso(paso + 1)}>
+          Siguiente
+        </button>
+      ) : (
+        <button
+          type="button"
+          className="cp-add-btn"
+          disabled={guardando || Boolean(guardado)}
+          onClick={() => { if (!guardando && !guardado) solicitarGuardado(); }}
+        >
+          {guardando ? 'Guardando...' : 'Guardar y descargar PDF'}
+        </button>
+      )}
+    </div>
+  );
+
   return (
     <div className="cp-wrap">
-      <PanelTopbar title="Formato de recepción" subtitle="Consultorio Jurídico · Unicórdoba" />
+      <PanelTopbar title="Formato de recepción" subtitle="Consultorio Jurídico · Unicórdoba" action={acciones} />
+      {/* Barra de progreso pegada justo debajo del encabezado */}
+      <div
+        className="rf-avance"
+        role="progressbar"
+        aria-label="Avance del formulario"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={progreso}
+      >
+        <div className={`rf-avance-relleno${progreso === 100 ? ' completo' : ''}`} style={{ width: `${progreso}%` }} />
+      </div>
       <div className="cp-content">
         <FormProvider value={contexto}>
           <form
@@ -231,56 +277,25 @@ export default function RecepcionPage() {
               </div>
             )}
 
-            {/* ───────── Indicador de secciones (se puede tocar cualquiera sin perder lo escrito) ───────── */}
-            <nav className="rf-pasos" aria-label="Secciones del formulario">
-              {SECCIONES.map((s, i) => {
-                const completa = faltantes[i].length === 0;
-                return (
-                  <button
-                    key={s.titulo}
-                    type="button"
-                    className={`rf-paso${i === paso ? ' activo' : ''}${completa ? ' completo' : ''}`}
-                    onClick={() => irAPaso(i)}
-                    aria-current={i === paso ? 'step' : undefined}
-                    title={s.titulo}
-                  >
-                    <span className="rf-paso-num">{completa ? '✓' : i + 1}</span>
-                    <span className="rf-paso-texto">{s.corto}</span>
-                  </button>
-                );
-              })}
-            </nav>
-            <div className="rf-progreso">Sección {paso + 1} de {SECCIONES.length}</div>
-
             <CamposSeccion paso={paso} medidor={medidor} obligatorios />
+          </form>
 
-            {/* ───────── Barra de navegación ───────── */}
-            <div className="rf-barra">
-              <div className="rf-barra-mensaje">
-                {mensaje && <span className={`rf-barra-texto ${mensaje.tipo}`}>{mensaje.texto}</span>}
-                {!mensaje && guardado && <span className="rf-barra-texto success">Guardado. Pulsa «Nueva recepción» para llenar otro formato.</span>}
-                {!mensaje && !guardado && (
-                  <span className="rf-barra-ayuda">
-                    * Campos obligatorios. Puedes moverte entre secciones sin perder lo que llevas escrito.
-                  </span>
-                )}
-              </div>
-              <div className="rf-barra-botones">
-                <button type="button" className="btn-secundario" disabled={paso === 0 || guardando} onClick={() => irAPaso(paso - 1)}>
-                  Anterior
-                </button>
-                {paso < ULTIMO_PASO ? (
-                  <button type="button" className="btn-primary" onClick={() => irAPaso(paso + 1)}>
-                    Siguiente
+          {/* ───────── Mensaje (datos obligatorios o error al guardar) ───────── */}
+          {mensaje && (
+            <div className="modal-overlay" onClick={() => setMensaje(null)}>
+              <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+                <div className="modal-card-cuerpo">
+                  <h3>{mensaje.titulo}</h3>
+                  <p className="rf-aviso-texto">{mensaje.texto}</p>
+                </div>
+                <div className="modal-acciones">
+                  <button type="button" className="btn-primary" autoFocus onClick={() => setMensaje(null)}>
+                    Entendido
                   </button>
-                ) : (
-                  <button type="submit" className="btn-primary" disabled={guardando || Boolean(guardado)}>
-                    {guardando ? 'Guardando...' : 'Guardar y descargar PDF'}
-                  </button>
-                )}
+                </div>
               </div>
             </div>
-          </form>
+          )}
 
           {/* ───────── Advertencia: espacios en blanco ───────── */}
           {aviso && (

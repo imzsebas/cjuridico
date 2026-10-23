@@ -24,6 +24,16 @@ export function Seccion({ titulo, children }: { titulo: string; children: ReactN
   );
 }
 
+// Bloque con título pequeño que agrupa campos relacionados dentro de una sección
+export function Tarjeta({ titulo, children }: { titulo: string; children: ReactNode }) {
+  return (
+    <div className="rf-tarjeta">
+      <div className="rf-tarjeta-titulo">{titulo}</div>
+      <div className="rf-tarjeta-cuerpo">{children}</div>
+    </div>
+  );
+}
+
 export function Fila({ children, columnas }: { children: ReactNode; columnas?: string }) {
   return (
     <div className="rf-fila" style={columnas ? { gridTemplateColumns: columnas } : undefined}>
@@ -83,6 +93,39 @@ export function Lista({
   );
 }
 
+// Combo box para opciones de elección única que se guardan como varias llaves ('X' en la elegida).
+// `nombres` permite mostrar un nombre más completo que la etiqueta corta (p. ej. "CC" → "Cédula de ciudadanía").
+export function ListaClaves({
+  label, opciones, placeholder = 'Seleccione una opción', nombres,
+}: {
+  label?: string;
+  opciones: { k: string; label: string }[];
+  placeholder?: string;
+  nombres?: Record<string, string>;
+}) {
+  const { valores, setVarios } = useFormulario();
+  // Si un registro antiguo trae varias marcadas, se muestra la primera hasta que se cambie
+  const actual = opciones.find((o) => Boolean(valores[o.k]))?.k ?? '';
+  const id = `rf-lista-${opciones[0]?.k ?? 'x'}`;
+
+  function elegir(k: string) {
+    const cambios: Valores = {};
+    opciones.forEach((o) => { cambios[o.k] = ''; });
+    if (k) cambios[k] = 'X';
+    setVarios(cambios);
+  }
+
+  return (
+    <div className="rf-campo">
+      {label && <label htmlFor={id}>{label}</label>}
+      <select id={id} aria-label={label ? undefined : placeholder} value={actual} onChange={(e) => elegir(e.target.value)}>
+        <option value="">{placeholder}</option>
+        {opciones.map((o) => <option key={o.k} value={o.k}>{nombres?.[o.label] ?? o.label}</option>)}
+      </select>
+    </div>
+  );
+}
+
 // Casilla independiente (se pueden marcar varias)
 export function Casilla({ k, label }: { k: string; label: string }) {
   const { valores, set } = useFormulario();
@@ -92,6 +135,21 @@ export function Casilla({ k, label }: { k: string; label: string }) {
       <input type="checkbox" checked={marcada} onChange={(e) => set(k, e.target.checked ? 'X' : '')} />
       <span>{label}</span>
     </label>
+  );
+}
+
+// Botón tipo píldora para opciones de elección única
+function Segmento({ marcada, onClick, children }: { marcada: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={marcada}
+      className={`rf-segmento${marcada ? ' marcada' : ''}`}
+      onClick={onClick}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -107,16 +165,12 @@ export function GrupoUnico({ titulo, opciones }: { titulo?: string; opciones: { 
   return (
     <div className="rf-grupo">
       {titulo && <div className="rf-grupo-titulo">{titulo}</div>}
-      <div className="rf-opciones">
-        {opciones.map((o) => {
-          const marcada = Boolean(valores[o.k]);
-          return (
-            <label key={o.k} className={`rf-opcion${marcada ? ' marcada' : ''}`}>
-              <input type="checkbox" checked={marcada} onChange={() => alternar(o.k)} />
-              <span>{o.label}</span>
-            </label>
-          );
-        })}
+      <div className="rf-segmentos" role="radiogroup" aria-label={titulo}>
+        {opciones.map((o) => (
+          <Segmento key={o.k} marcada={Boolean(valores[o.k])} onClick={() => alternar(o.k)}>
+            {o.label}
+          </Segmento>
+        ))}
       </div>
     </div>
   );
@@ -125,13 +179,14 @@ export function GrupoUnico({ titulo, opciones }: { titulo?: string; opciones: { 
 // Pregunta SI / NO. Lo que se pase como hijo solo aparece cuando la respuesta es SI;
 // al elegir NO se borran los campos indicados en `limpiar`.
 export function SiNo({
-  titulo, kSi, kNo, limpiar = [], children,
+  titulo, kSi, kNo, limpiar = [], children, enLinea,
 }: {
   titulo: string;
   kSi: string;
   kNo: string;
   limpiar?: string[];
   children?: ReactNode;
+  enLinea?: ReactNode; // aparece en la misma fila de la pregunta cuando la respuesta es SI
 }) {
   const { valores, setVarios } = useFormulario();
   const si = Boolean(valores[kSi]);
@@ -149,15 +204,10 @@ export function SiNo({
     <div className="rf-sino">
       <div className="rf-sino-cabecera">
         <span className="rf-sino-titulo">{titulo}</span>
-        <div className="rf-opciones">
-          <label className={`rf-opcion${si ? ' marcada' : ''}`}>
-            <input type="checkbox" checked={si} onChange={() => elegir('si')} />
-            <span>SI</span>
-          </label>
-          <label className={`rf-opcion${no ? ' marcada' : ''}`}>
-            <input type="checkbox" checked={no} onChange={() => elegir('no')} />
-            <span>NO</span>
-          </label>
+        {si && enLinea && <div className="rf-sino-extra">{enLinea}</div>}
+        <div className="rf-segmentos" role="radiogroup" aria-label={titulo}>
+          <Segmento marcada={si} onClick={() => elegir('si')}>SI</Segmento>
+          <Segmento marcada={no} onClick={() => elegir('no')}>NO</Segmento>
         </div>
       </div>
       {si && children && <div className="rf-sino-detalle">{children}</div>}

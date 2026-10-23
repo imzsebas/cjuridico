@@ -250,6 +250,113 @@ body {
   color: #991b1b;
 }
 
+/* ---------- Login: campos con línea, iconos y ojito (solo dentro de .auth-card) ---------- */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+.auth-input-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 2px;
+  margin-bottom: 1.4rem;
+  border-bottom: 1.5px solid #bcc7c0;
+  color: #9aa8a1;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.auth-input-row:focus-within {
+  border-bottom-color: var(--green-700);
+  color: var(--green-700);
+}
+
+.auth-input-icon {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+.auth-input-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 0;
+  border: none;
+  outline: none;
+  box-shadow: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 15px;
+  color: var(--green-900);
+}
+
+.auth-input-row input::placeholder {
+  color: #9aa8a1;
+}
+
+.auth-eye {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #9aa8a1;
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s;
+}
+
+.auth-eye svg { width: 20px; height: 20px; }
+
+.auth-eye:hover,
+.auth-eye:focus-visible {
+  color: var(--green-700);
+  background: rgba(31, 92, 66, 0.08);
+  outline: none;
+}
+
+.auth-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 2rem;
+}
+
+.auth-forgot {
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--gold-600);
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.auth-forgot:hover,
+.auth-forgot:focus-visible {
+  color: var(--green-700);
+  text-decoration: underline;
+  outline: none;
+}
+
+/* Botón del login: cuadrado con bordes redondeados, ancho según su texto */
+.auth-card .btn-primary {
+  width: auto;
+  padding: 10px 22px;
+  margin-left: auto;
+  border-radius: 10px;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
 /* 🎬 FASE DE SALIDA: el panel de marca se encoge a sidebar (220px) mientras
    el bloque claro crece hasta el color de fondo del panel (var(--green-100)) */
 .auth-page.exiting .auth-brand { width: 220px; }
@@ -2019,3 +2126,292 @@ appearance: none; -webkit-appearance: none; transition: background 0.15s ease;
 .cal-celda-editable { cursor: pointer; transition: background 0.15s; }
 .cal-celda-editable:hover { background: #f7f5ee; }
 .cal-celda-editable:focus-visible { outline: 2px solid #b08d57; outline-offset: -2px; }
+
+
+/* =====================================================================
+   FORMATO DE RECEPCIÓN · pulido visual
+   ===================================================================== */
+
+/* Pie de navegación: sólido, sin transparencia */
+.panel-shell .rf-barra {
+  background: #ffffff;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid var(--linea);
+  border-radius: 8px;
+  box-shadow: 0 -12px 24px -14px rgba(18, 53, 36, 0.22);
+  padding: 12px 18px;
+}
+.rf-barra-ayuda { font-size: 12.5px; color: var(--tinta-suave); }
+
+/* Tarjeta de sección: más opaca para que la marca de agua no moleste */
+.panel-shell .rf-seccion {
+  background: rgba(255, 255, 255, 0.96);
+  border-radius: 8px;
+}
+
+/* Encabezado de sección: sobrio, a la izquierda, con filete dorado */
+.panel-shell .rf-seccion-titulo {
+  background: transparent;
+  color: var(--green-900);
+  font-family: var(--font-serif);
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-align: left;
+  padding: 16px 20px 14px;
+  border-radius: 0;
+  border-bottom: 1px solid var(--linea);
+  border-left: 3px solid var(--gold-600);
+}
+.rf-cuerpo { padding: 20px; gap: 22px; }
+
+/* Etiquetas y campos */
+.rf-campo label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--tinta-suave);
+  margin-bottom: 5px;
+}
+.panel-shell .rf-campo input,
+.panel-shell .rf-campo textarea,
+.panel-shell .rf-campo select {
+  background: #ffffff;
+  border: 1px solid #cdd6d1;
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.panel-shell .rf-campo input:hover,
+.panel-shell .rf-campo textarea:hover,
+.panel-shell .rf-campo select:hover { border-color: #aebbb4; }
+.panel-shell .rf-campo input[readonly] { background: #f3f6f4; border-color: var(--linea); }
+
+/* Subtítulos de grupo: funcionan como separadores dentro de la sección */
+.rf-grupo-titulo {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--tinta-suave);
+  padding-bottom: 6px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--linea-suave);
+}
+
+/* Opciones (casillas): discretas hasta que se marcan */
+.rf-opciones { gap: 8px; }
+.rf-opciones-rejilla {
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 8px;
+}
+.panel-shell .rf-opcion {
+  border: 1px solid var(--linea);
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 9px 12px;
+  font-size: 13px;
+}
+.panel-shell .rf-opcion:hover { border-color: var(--green-500); background: #fafcfb; }
+.panel-shell .rf-opcion.marcada {
+  border-color: var(--green-700);
+  background: #eef4f0;
+  box-shadow: inset 3px 0 0 var(--green-700);
+  font-weight: 600;
+  color: var(--green-900);
+}
+
+/* Bloques Sí/No */
+.panel-shell .rf-sino {
+  border: 1px solid var(--linea);
+  border-radius: 8px;
+  background: #fbfcfb;
+  padding: 12px 14px;
+}
+
+/* Stepper */
+.rf-paso {
+  border: 1px solid var(--linea);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.96);
+}
+.rf-paso.activo {
+  background: var(--green-900);
+  border-color: var(--green-900);
+  box-shadow: inset 0 -2px 0 var(--gold-600);
+}
+.rf-paso.completo:not(.activo) { border-color: #bcd5c7; color: var(--green-700); }
+
+/* El stepper ya dice en qué sección estás */
+.rf-progreso { display: none; }
+
+/* =====================================================================
+   FORMATO DE RECEPCIÓN · tarjetas y botones de una sola opción
+   Pega esto al final de globals.css, DESPUÉS del bloque de "pulido visual"
+   que te pasé antes (este lo complementa y lo ajusta).
+   ===================================================================== */
+
+/* ---------- Tarjetas de grupo ---------- */
+.rf-tarjeta {
+  border: 1px solid var(--linea);
+  border-radius: 8px;
+  background: #fcfdfc;
+  overflow: hidden;
+}
+.rf-tarjeta-titulo {
+  padding: 9px 16px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--tinta-suave);
+  background: #f4f7f5;
+  border-bottom: 1px solid var(--linea);
+}
+.rf-tarjeta-cuerpo {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Dentro de una tarjeta, el subtítulo de grupo es más discreto (sin línea) */
+.rf-tarjeta .rf-grupo-titulo {
+  border-bottom: none;
+  padding-bottom: 0;
+  margin-bottom: 8px;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--green-900);
+}
+.rf-tarjeta .rf-ayuda { margin: 0; }
+.rf-tarjeta .rf-grupo .rf-ayuda { margin: -2px 0 10px; }
+
+/* El bloque Sí/No dentro de una tarjeta no necesita doble borde */
+.rf-tarjeta .rf-sino { background: #ffffff; }
+
+/* ---------- Botones de elección única (píldoras) ---------- */
+.rf-segmentos { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.rf-segmento {
+  appearance: none;
+  -webkit-appearance: none;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.2;
+  padding: 8px 18px;
+  border: 1px solid #cdd6d1;
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.rf-segmento:hover { border-color: var(--green-500); background: #f6faf8; }
+.rf-segmento.marcada,
+.rf-segmento.marcada:hover {
+  background: var(--green-900);
+  border-color: var(--green-900);
+  color: #ffffff;
+  font-weight: 600;
+}
+.rf-segmento:focus-visible { outline: 2px solid var(--gold-600); outline-offset: 2px; }
+
+/* ---------- Caracterización poblacional: más compacta (selección múltiple) ---------- */
+.rf-tarjeta .rf-opciones-rejilla {
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 6px;
+}
+.rf-tarjeta .rf-opciones-rejilla .rf-opcion { padding: 7px 10px; font-size: 12.5px; }
+
+/* ---------- Móvil ---------- */
+@media (max-width: 768px) {
+  .rf-tarjeta-cuerpo { padding: 12px; }
+  .rf-segmento { padding: 8px 14px; }
+}
+
+/* =====================================================================
+   FORMATO DE RECEPCIÓN · ajustes de espacio (combos y filas compactas)
+   Pega esto al final de globals.css, después de los dos bloques anteriores.
+   ===================================================================== */
+
+/* Pregunta SI/NO con un campo que aparece en la misma fila (discapacidad) */
+.rf-sino-extra {
+  flex: 0 1 380px;
+  margin-left: auto;
+  margin-right: 12px;
+  min-width: 220px;
+}
+.rf-sino-extra .rf-campo { margin: 0; }
+
+/* Etiqueta para grupos de casillas que van al lado de un campo */
+.rf-campo .rf-etiqueta {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--tinta-suave);
+  margin-bottom: 5px;
+}
+/* Casillas en una sola fila, a la misma altura que un campo de texto */
+.rf-opciones-linea { flex-wrap: nowrap; }
+.rf-opciones-linea .rf-opcion { min-height: 42px; }
+
+@media (max-width: 768px) {
+  .rf-sino-extra { flex: 1 1 100%; margin: 0; order: 3; }
+  .rf-opciones-linea { flex-wrap: wrap; }
+}
+
+/* Barra de progreso: franja delgada al borde superior, no ocupa espacio del contenido */
+.rf-avance {
+  flex-shrink: 0;
+  height: 4px;
+  background: #dbe7de;
+  overflow: hidden;
+}
+.rf-avance-relleno {
+  height: 100%;
+  background: linear-gradient(90deg, var(--green-700), var(--green-500));
+  transition: width 0.35s ease, background 0.35s ease;
+}
+.rf-avance-relleno.completo {
+  background: linear-gradient(90deg, var(--green-500), var(--gold-600));
+}
+
+/* Botones Anterior / Siguiente en el encabezado */
+.rf-acciones { display: flex; gap: 8px; }
+.cp-add-btn.secundario {
+  background: var(--white);
+  color: var(--green-900);
+  border: 1.5px solid #d7e6db;
+}
+.cp-add-btn.secundario:hover { background: var(--green-100); opacity: 1; } 
+
+/* Casillas dentro de un .rf-campo (p. ej. Ocupación): anular el estilo de los campos de texto */
+.panel-shell .rf-campo .rf-opcion {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--ink);
+}
+.panel-shell .rf-campo .rf-opcion.marcada {
+  font-weight: 600;
+  color: var(--green-900);
+}
+.panel-shell .rf-campo .rf-opcion input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  accent-color: var(--green-700);
+}
+.panel-shell .rf-campo .rf-opcion input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--green-500);
+  outline-offset: 2px;
+}

@@ -4,7 +4,7 @@
 // Se usa en la pantalla de Recepción (una sección a la vez) y en el modal de edición de Asignación (todas juntas).
 
 import {
-  Casilla, Fila, GrupoUnico, Lista, Seccion, SiNo, Texto, useFormulario,
+  Casilla, Fila, GrupoUnico, Lista, ListaClaves, Seccion, SiNo, Tarjeta, Texto, useFormulario,
 } from '@/components/recepcion/Controles';
 import { LINEAS_HECHO, Medidor, Valores, partirEnLineas } from '@/lib/formatoRecepcion';
 import {
@@ -19,6 +19,14 @@ const aInputFecha = (f: string) => {
 const deInputFecha = (iso: string) => {
   const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   return m ? `${m[3]}/${m[2]}/${m[1]}` : '';
+};
+
+// Nombre completo de cada tipo de documento (el formato guarda la sigla, aquí se muestra completo)
+const NOMBRES_DOCUMENTO: Record<string, string> = {
+  TI: 'Tarjeta de identidad',
+  CC: 'Cédula de ciudadanía',
+  CE: 'Cédula de extranjería',
+  Pasaporte: 'Pasaporte',
 };
 
 // Un hecho de la síntesis: cuadro de texto + aviso si no cabe en el espacio del formato
@@ -76,14 +84,20 @@ function EstadoCivilYUnion() {
     <>
       <div className="rf-grupo">
         <div className="rf-grupo-titulo">Estado civil</div>
-        <div className="rf-opciones">
+        <div className="rf-segmentos" role="radiogroup" aria-label="Estado civil">
           {ESTADO_CIVIL.map((o) => {
             const marcada = Boolean(valores[o.k]);
             return (
-              <label key={o.k} className={`rf-opcion${marcada ? ' marcada' : ''}`}>
-                <input type="checkbox" checked={marcada} onChange={() => alternar(o.k)} />
-                <span>{o.label}</span>
-              </label>
+              <button
+                key={o.k}
+                type="button"
+                role="radio"
+                aria-checked={marcada}
+                className={`rf-segmento${marcada ? ' marcada' : ''}`}
+                onClick={() => alternar(o.k)}
+              >
+                {o.label}
+              </button>
             );
           })}
         </div>
@@ -109,75 +123,89 @@ export default function CamposSeccion({
     {/* ───────── 1. Información del usuario ───────── */}
     {paso === 0 && (
       <Seccion titulo={`1. ${SECCIONES[0].titulo}`}>
-        <Fila>
-          {/* El N.º de asesoría SIEMPRE se escribe a mano (monitor o administrador); es opcional y se puede poner después */}
-          <Texto k="asesoria_no" label="N.º asesoría" inputMode="numeric" />
-          <div className="rf-campo">
-            <label htmlFor="rf-fecha">Fecha</label>
-            <input
-              id="rf-fecha"
-              type="date"
-              value={aInputFecha(valores.fecha ?? '')}
-              onChange={(e) => set('fecha', deInputFecha(e.target.value))}
-            />
+        <Tarjeta titulo="Datos de la asesoría">
+          <Fila>
+            {/* El N.º de asesoría SIEMPRE se escribe a mano (monitor o administrador); es opcional y se puede poner después */}
+            <Texto k="asesoria_no" label="N.º asesoría" inputMode="numeric" />
+            <div className="rf-campo">
+              <label htmlFor="rf-fecha">Fecha</label>
+              <input
+                id="rf-fecha"
+                type="date"
+                value={aInputFecha(valores.fecha ?? '')}
+                onChange={(e) => set('fecha', deInputFecha(e.target.value))}
+              />
+            </div>
+            <Texto k="hora_recepcion" label="Hora de recepción" tipo="time" />
+          </Fila>
+        </Tarjeta>
+
+        <Tarjeta titulo="Datos personales">
+          <Fila columnas="2fr 1fr">
+            <Texto k="nombres_apellidos" label="Nombre y apellido según documento de identidad *" />
+            <Texto k="nombre_identitario" label="Nombre identitario" />
+          </Fila>
+          <Fila columnas="1.1fr 1fr 1.9fr">
+            <ListaClaves label="Tipo de documento" opciones={TIPO_IDENTIFICACION} nombres={NOMBRES_DOCUMENTO} />
+            <Texto k="cedula_numero" label="N.º de documento" />
+            <Texto k="direccion" label="Ciudad / Dirección" />
+          </Fila>
+        </Tarjeta>
+
+        <Tarjeta titulo="Contacto">
+          <Fila>
+            <Texto k="contacto_1" label="N.º de contacto" tipo="tel" inputMode="tel" />
+            <Texto k="contacto_2" label="Otro N.º de contacto" tipo="tel" inputMode="tel" />
+            <Texto k="correo" label="Correo electrónico" />
+          </Fila>
+        </Tarjeta>
+
+        <Tarjeta titulo="Condición y caracterización">
+          <SiNo
+            titulo="¿Presenta alguna discapacidad?"
+            kSi="discapacidad_si"
+            kNo="discapacidad_no"
+            limpiar={DISCAPACIDADES.map((d) => d.k)}
+            enLinea={<ListaClaves opciones={DISCAPACIDADES} placeholder="Tipo de discapacidad *" />}
+          />
+          <div className="rf-grupo">
+            <div className="rf-grupo-titulo">Caracterización poblacional</div>
+            <p className="rf-ayuda">Puede marcar varias opciones.</p>
+            <div className="rf-opciones rf-opciones-rejilla">
+              {POBLACION.map((p) => <Casilla key={p.k} k={p.k} label={p.label} />)}
+            </div>
+            <div style={{ marginTop: 12, maxWidth: 420 }}>
+              <Texto k="poblacion_otra" label="Otra" />
+            </div>
           </div>
-          <Texto k="hora_recepcion" label="Hora de recepción" tipo="time" />
-        </Fila>
-        <Fila columnas="2fr 1fr">
-          <Texto k="nombres_apellidos" label="Nombre y apellido según documento de identidad *" />
-          <Texto k="nombre_identitario" label="Nombre identitario" />
-        </Fila>
-        <Fila>
-          <Texto k="contacto_1" label="N.º de contacto" tipo="tel" inputMode="tel" />
-          <Texto k="contacto_2" label="Otro N.º de contacto" tipo="tel" inputMode="tel" />
-          <Texto k="correo" label="Correo electrónico" />
-        </Fila>
-        <Fila columnas="1fr 2fr">
-          <Texto k="cedula_numero" label="N.º de documento" />
-          <Texto k="direccion" label="Ciudad / Dirección" />
-        </Fila>
-        <GrupoUnico titulo="Tipo de identificación" opciones={TIPO_IDENTIFICACION} />
-        <SiNo
-          titulo="¿Presenta alguna discapacidad?"
-          kSi="discapacidad_si"
-          kNo="discapacidad_no"
-          limpiar={DISCAPACIDADES.map((d) => d.k)}
-        >
-          <div className="rf-grupo-titulo">Tipo de discapacidad</div>
-          <div className="rf-opciones">
-            {DISCAPACIDADES.map((d) => <Casilla key={d.k} k={d.k} label={d.label} />)}
-          </div>
-        </SiNo>
-        <div className="rf-grupo">
-          <div className="rf-grupo-titulo">Caracterización poblacional</div>
-          <div className="rf-opciones rf-opciones-rejilla">
-            {POBLACION.map((p) => <Casilla key={p.k} k={p.k} label={p.label} />)}
-          </div>
-          <div style={{ marginTop: 12, maxWidth: 420 }}>
-            <Texto k="poblacion_otra" label="Otra" />
-          </div>
-        </div>
+        </Tarjeta>
       </Seccion>
     )}
 
     {/* ───────── 2. Aspectos económicos ───────── */}
     {paso === 1 && (
       <Seccion titulo={`2. ${SECCIONES[1].titulo}`}>
-        <GrupoUnico titulo="Escolaridad" opciones={ESCOLARIDAD} />
-        <div className="rf-grupo">
-          <div className="rf-grupo-titulo">Ocupación</div>
-          <div className="rf-opciones">
-            {OCUPACION.map((o) => <Casilla key={o.k} k={o.k} label={o.label} />)}
-          </div>
-        </div>
-        <Fila>
-          <Texto k="ingresos_mensuales" label="Ingresos mensuales" inputMode="numeric" />
-          <Texto k="estrato" label="Estrato" inputMode="numeric" />
-        </Fila>
-        <Fila>
-          <Texto k="empresa_trabajo" label="Empresa donde trabaja" />
-          <Texto k="direccion_trabajo" label="Dirección del lugar de trabajo" />
-        </Fila>
+        <Tarjeta titulo="Formación y ocupación">
+          <Fila>
+            <ListaClaves label="Escolaridad" opciones={ESCOLARIDAD} />
+            <div className="rf-campo">
+              <div className="rf-etiqueta">Ocupación</div>
+              <div className="rf-opciones rf-opciones-linea">
+                {OCUPACION.map((o) => <Casilla key={o.k} k={o.k} label={o.label} />)}
+              </div>
+            </div>
+          </Fila>
+        </Tarjeta>
+        <Tarjeta titulo="Ingresos y lugar de trabajo">
+          <Fila>
+            <Texto k="ingresos_mensuales" label="Ingresos mensuales" inputMode="numeric" />
+            <Texto k="estrato" label="Estrato" inputMode="numeric" />
+          </Fila>
+          <Fila>
+            <Texto k="empresa_trabajo" label="Empresa donde trabaja" />
+            <Texto k="direccion_trabajo" label="Dirección del lugar de trabajo" />
+          </Fila>
+        </Tarjeta>
       </Seccion>
     )}
 
@@ -210,14 +238,16 @@ export default function CamposSeccion({
     {/* ───────── 4. Información personal ───────── */}
     {paso === 3 && (
       <Seccion titulo={`4. ${SECCIONES[3].titulo}`}>
-        <EstadoCivilYUnion />
-        <Fila>
-          <Texto k="personas_a_cargo" label="N.º personas a cargo" tipo="number" inputMode="numeric" />
-        </Fila>
-        <Fila>
-          <Texto k="nombre_conyuge" label="Nombre del cónyuge o compañero(a) permanente" />
-          <Texto k="conyuge_contacto" label="N.º de contacto del cónyuge o compañero(a) permanente" tipo="tel" inputMode="tel" />
-        </Fila>
+        <Tarjeta titulo="Estado civil">
+          <EstadoCivilYUnion />
+        </Tarjeta>
+        <Tarjeta titulo="Familia">
+          <Fila columnas="minmax(150px, 0.6fr) 1.6fr 1.2fr">
+            <Texto k="personas_a_cargo" label="N.º personas a cargo" tipo="number" inputMode="numeric" />
+            <Texto k="nombre_conyuge" label="Cónyuge o compañero(a) permanente" />
+            <Texto k="conyuge_contacto" label="N.º de contacto del cónyuge" tipo="tel" inputMode="tel" />
+          </Fila>
+        </Tarjeta>
       </Seccion>
     )}
 
@@ -233,35 +263,36 @@ export default function CamposSeccion({
     {/* ───────── 6. Estudiante que recepciona ───────── */}
     {paso === 5 && (
       <Seccion titulo={`6. ${SECCIONES[5].titulo}`}>
-        <Fila columnas="2fr 1fr 1fr">
-          <Texto k="estudiante_recepciona_nombre" label="Nombres y apellidos *" />
-          <Texto k="estudiante_recepciona_codigo" label="Código" />
-          <Texto k="estudiante_recepciona_telefono" label="Teléfono" tipo="tel" inputMode="tel" />
-        </Fila>
+        <Tarjeta titulo="Estudiante que recepciona">
+          <Fila columnas="2fr 1fr 1fr">
+            <Texto k="estudiante_recepciona_nombre" label="Nombres y apellidos *" />
+            <Texto k="estudiante_recepciona_codigo" label="Código" />
+            <Texto k="estudiante_recepciona_telefono" label="Teléfono" tipo="tel" inputMode="tel" />
+          </Fila>
+        </Tarjeta>
 
-        <div className="rf-grupo">
-          <div className="rf-grupo-titulo">Síntesis de los hechos</div>
+        <Tarjeta titulo="Síntesis de los hechos">
           <p className="rf-ayuda">
             Escuche de manera atenta el relato y luego elabore un resumen claro, preciso y detallado en letra legible.
           </p>
           <div className="rf-hechos">
             {HECHOS.map((n) => <Hecho key={n} n={n} medidor={medidor} obligatorio={obligatorios && n === 1} />)}
           </div>
-        </div>
+        </Tarjeta>
 
-        <div className="rf-grupo">
-          <div className="rf-grupo-titulo">Documentos aportados</div>
+        <Tarjeta titulo="Documentos aportados">
           <div className="rf-fila">
             {DOCUMENTOS.map((n) => <Texto key={n} k={`documento_aportado_${n}`} label={`Documento ${n}`} />)}
           </div>
-        </div>
+        </Tarjeta>
 
-        <Fila>
-          <Lista k="area_derecho" label={`Área de derecho${obligatorios ? ' *' : ''}`} opciones={AREAS_DERECHO} />
-          <Texto k="naturaleza_asunto" label={`Naturaleza del asunto${obligatorios ? ' *' : ''}`} />
-        </Fila>
-
-        <GrupoUnico titulo={`Asesoría (con o sin reparto)${obligatorios ? ' *' : ''}`} opciones={ASESORIA_REPARTO} />
+        <Tarjeta titulo="Clasificación del caso">
+          <Fila>
+            <Lista k="area_derecho" label={`Área de derecho${obligatorios ? ' *' : ''}`} opciones={AREAS_DERECHO} />
+            <Texto k="naturaleza_asunto" label={`Naturaleza del asunto${obligatorios ? ' *' : ''}`} />
+          </Fila>
+          <GrupoUnico titulo={`Asesoría (con o sin reparto)${obligatorios ? ' *' : ''}`} opciones={ASESORIA_REPARTO} />
+        </Tarjeta>
       </Seccion>
     )}
     </>
