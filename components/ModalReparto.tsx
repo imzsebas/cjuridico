@@ -9,11 +9,12 @@ import { supabase } from '@/lib/supabase';
 
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
-type FilaReparto = { asesoria: string; usuario: string; area: string; fecha: string; asunto: string; estudiante: string };
+type FilaReparto = { asesoria: string; usuario: string; area: string; fecha: string; asunto: string; estudiante: string; reasignacion: boolean };
 
 type FilaBD = {
   fecha_asignacion: string;
   asesoria_no: string | null;
+  es_reasignacion: boolean | null;
   estudiantes: { nombre_estudiante: string } | { nombre_estudiante: string }[] | null;
   recepciones:
     | { asesoria_no: string | null; nombres_apellidos: string | null; area_derecho: string | null; naturaleza_asunto: string | null }
@@ -58,7 +59,7 @@ async function traerReparto(desde: string, hasta: string): Promise<FilaReparto[]
     const { data, error } = await supabase
       .from('asignaciones')
       .select(
-        'fecha_asignacion, asesoria_no, estudiantes ( nombre_estudiante ), recepciones ( asesoria_no, nombres_apellidos, area_derecho, naturaleza_asunto )'
+        'fecha_asignacion, asesoria_no, es_reasignacion, estudiantes ( nombre_estudiante ), recepciones ( asesoria_no, nombres_apellidos, area_derecho, naturaleza_asunto )'
       )
       .eq('activa', true)
       .gte('fecha_asignacion', desde)
@@ -77,6 +78,7 @@ async function traerReparto(desde: string, hasta: string): Promise<FilaReparto[]
         fecha: r.fecha_asignacion,
         asunto: rec?.naturaleza_asunto ?? '',
         estudiante: est?.nombre_estudiante ?? '',
+        reasignacion: r.es_reasignacion === true,
       });
     });
     if ((data?.length ?? 0) < TAM) break;
@@ -104,46 +106,74 @@ async function crearExcel(filas: FilaReparto[], desde: string, hasta: string, di
   const borde = { style: 'thin' as const, color: { argb: 'FF000000' } };
   const bordes = { top: borde, left: borde, bottom: borde, right: borde };
 
+  const ENCABEZADOS = ['NÚMERO DE ASESORÍA', 'USUARIO', 'ÁREA', 'FECHA DE REPARTO', 'ASUNTO', 'ESTUDIANTE ASIGNADO'];
+  const ANCHOS = [22, 22, 42, 26, 22, 46, 44];
+
   hojas.forEach((h) => {
     const hoja = libro.addWorksheet(h.nombre);
-    hoja.columns = [
-      { header: 'NÚMERO DE ASESORÍA', key: 'asesoria', width: 22 },
-      { header: 'USUARIO', key: 'usuario', width: 42 },
-      { header: 'ÁREA', key: 'area', width: 26 },
-      { header: 'FECHA DE REPARTO', key: 'fecha', width: 22 },
-      { header: 'ASUNTO', key: 'asunto', width: 46 },
-      { header: 'ESTUDIANTE ASIGNADO', key: 'estudiante', width: 44 },
-    ];
+    ANCHOS.forEach((w, i) => { hoja.getColumn(i + 1).width = w; });
 
-    h.filas.forEach((f) => {
-      const [a, m, d] = partes(f.fecha);
-      hoja.addRow({
-        asesoria: f.asesoria.toUpperCase(),
-        usuario: f.usuario.toUpperCase(),
-        area: f.area.toUpperCase(),
-        fecha: new Date(Date.UTC(a, m - 1, d)),
-        asunto: f.asunto.toUpperCase(),
-        estudiante: f.estudiante.toUpperCase(),
-      });
-    });
+    // Cada bloque: fila de encabezado (con "ASIGNACIÓN" o "REASIGNACIÓN" en la columna A) + sus filas.
+    // Entre un bloque y otro queda una fila en blanco. Si un bloque no tiene filas, no se escribe.
+    const bloques = [
+      { etiqueta: 'ASIGNACIÓN', filas: h.filas.filter((f) => !f.reasignacion) },
+      { etiqueta: 'REASIGNACIÓN', filas: h.filas.filter((f) => f.reasignacion) },
+    ].filter((b, i) => b.filas.length > 0 || (i === 0 && h.filas.length === 0));
 
-    // Todo el texto: tamaño 12, centrado (horizontal y vertical), con bordes y fila de 50 pt.
-    // Cabecera amarilla (#FFFF00) en negrita; el resto de la tabla en blanco.
-    hoja.eachRow((fila, n) => {
-      fila.height = 50;
-      fila.eachCell((celda) => {
+    bloques.forEach((b, idx) => {
+      if (idx > 0) hoja.addRow([]); // fila en blanco entre bloques
+
+      const cab = hoja.addRow([b.etiqueta, ...ENCABEZADOS]);
+      cab.height = 50;
+      cab.eachCell((celda, col) => {
         celda.border = bordes;
         celda.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-        celda.font = { size: 12, bold: n === 1, color: { argb: 'FF000000' } };
+        celda.font = { size: 12, bold: true, color: { argb: 'FF000000' } };
         celda.fill = {
           type: 'pattern',
           pattern: 'solid',
-          fgColor: { argb: n === 1 ? 'FFFFFF00' : 'FFFFFFFF' },
+          fgColor: { argb: col === 1 ? 'FF92D050' : 'FFFFFF00' }, // A en verde, el resto amarillo
         };
       });
+
+      // Misma asesoría (y misma fecha) con varios estudiantes → una sola fila,
+      // con los estudiantes uno debajo del otro en la última columna.
+      const grupos: { base: FilaReparto; estudiantes: string[] }[] = [];
+      const indice = new Map<string, number>();
+      b.filas.forEach((f, n) => {
+        const clave = f.asesoria ? `${f.asesoria}|${f.fecha}` : `sin-numero-${n}`;
+        const pos = indice.get(clave);
+        if (pos === undefined) {
+          indice.set(clave, grupos.length);
+          grupos.push({ base: f, estudiantes: f.estudiante ? [f.estudiante] : [] });
+        } else if (f.estudiante && !grupos[pos].estudiantes.includes(f.estudiante)) {
+          grupos[pos].estudiantes.push(f.estudiante);
+        }
+      });
+
+      grupos.forEach(({ base: f, estudiantes }) => {
+        const [a, m, d] = partes(f.fecha);
+        const fila = hoja.addRow([
+          null, // columna A: vacía en las filas de datos
+          f.asesoria.toUpperCase(),
+          f.usuario.toUpperCase(),
+          f.area.toUpperCase(),
+          new Date(Date.UTC(a, m - 1, d)),
+          f.asunto.toUpperCase(),
+          estudiantes.map((e) => e.toUpperCase()).join('\n'),
+        ]);
+        fila.height = Math.max(50, 20 * estudiantes.length + 10);
+        for (let col = 2; col <= 7; col++) {
+          const celda = fila.getCell(col);
+          celda.border = bordes;
+          celda.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+          celda.font = { size: 12, bold: false, color: { argb: 'FF000000' } };
+          celda.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } };
+          if (col === 5) celda.numFmt = 'dd/mm/yyyy';
+        }
+      });
     });
-    hoja.getColumn('fecha').numFmt = 'dd/mm/yyyy';
-    hoja.views = [{ state: 'frozen', ySplit: 1 }];
+
   });
 
   const nombre =

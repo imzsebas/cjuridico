@@ -13,8 +13,7 @@ import {
   listarMonitores,
   quitarRolMonitor,
 } from '@/lib/apiMonitores';
-
-const NIVELES = ['DERECHO PUBLICO', 'DERECHO PRIVADO', 'DERECHO LABORAL', 'DERECHO PENAL'] as const;
+import { NIVELES, nivelRomano, etiquetaNivel } from '@/lib/niveles';
 
 type Estudiante = {
   id: string;
@@ -381,7 +380,7 @@ export default function MonitoresPage() {
                       <td>{m.nombre || <span className="sin-dato">Sin ficha de estudiante</span>}</td>
                       <td>{m.codigo || <span className="sin-dato">—</span>}</td>
                       <td>{m.correo}</td>
-                      <td>{m.nivel || <span className="sin-dato">—</span>}</td>
+                      <td>{nivelRomano(m.nivel) || <span className="sin-dato">—</span>}</td>
                       <td>{fechaCorta(m.creado_en)}</td>
                     </tr>
                   ))}
@@ -403,7 +402,7 @@ export default function MonitoresPage() {
               <div className="caso-datos monitor-datos">
                 <div className="caso-dato"><span>Correo de ingreso</span><p>{detalle.correo}</p></div>
                 <div className="caso-dato"><span>Código</span><p>{detalle.codigo || '—'}</p></div>
-                <div className="caso-dato"><span>Nivel de consultorio</span><p>{detalle.nivel || '—'}</p></div>
+                <div className="caso-dato"><span>Nivel de consultorio</span><p>{nivelRomano(detalle.nivel) || '—'}</p></div>
                 <div className="caso-dato"><span>Monitor desde</span><p>{fechaCorta(detalle.creado_en)}</p></div>
               </div>
             </div>
@@ -528,7 +527,7 @@ export default function MonitoresPage() {
                       value={nuevo.nivel_consultorio}
                       onChange={(e) => setNuevo({ ...nuevo, nivel_consultorio: e.target.value })}
                     >
-                      {NIVELES.map((n) => <option key={n} value={n}>{n}</option>)}
+                      {NIVELES.map((n) => <option key={n} value={n}>{etiquetaNivel(n)}</option>)}
                     </select>
                   </div>
                   <div className="field">
@@ -580,7 +579,7 @@ export default function MonitoresPage() {
                                 />
                                 <span className="estudiante-nombre" title={e.nombre_estudiante}>{e.nombre_estudiante}</span>
                                 <span className="estudiante-codigo">({e.codigo_estudiante})</span>
-                                <span className="estudiante-badge vacio">{e.nivel_consultorio.replace('DERECHO ', '')}</span>
+                                <span className="estudiante-badge vacio">{nivelRomano(e.nivel_consultorio)}</span>
                               </div>
                             );
                           })}

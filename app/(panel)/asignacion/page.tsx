@@ -5,13 +5,14 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import PanelTopbar from '@/components/PanelTopbar';
 import Paginacion from '@/components/Paginacion';
+import { NIVELES, etiquetaNivel } from '@/lib/niveles';
+import { etiquetaTurno, momentoActual, nombreDia, textoSiguienteTurno } from '@/lib/turnos';
 
 // Pantalla "Asignar": un bloque por estudiante con una subfila por cada asesoría.
 // Las asesorías reasignadas (activa = false) quedan como historial, en rojo.
 // Requiere el SQL "asignaciones_reasignacion.sql" (columnas observaciones y
 // fecha_reasignacion + funciones asignar_asesoria, reasignar_asesoria y quitar_asignacion).
 
-const NIVELES = ['DERECHO PUBLICO', 'DERECHO PRIVADO', 'DERECHO LABORAL', 'DERECHO PENAL'] as const;
 const ESTUDIANTES_POR_PAGINA = 10;
 
 type Orden = 'nombre' | 'reciente' | 'mas' | 'menos';
@@ -109,6 +110,14 @@ export default function AsignacionPage() {
   const [orden, setOrden] = useState<Orden>('nombre');
   const [pagina, setPagina] = useState(1);
 
+  // "Disponible ahora": estudiantes cuyo horario incluye el turno en curso (hora de Colombia)
+  const [soloDisponibles, setSoloDisponibles] = useState(false);
+  const [ahora, setAhora] = useState(() => new Date());
+  const [enTurno, setEnTurno] = useState<Set<string>>(new Set());
+  const momento = momentoActual(ahora);
+  const turnoEnCurso = momento.turno;
+  const diaEnCurso = momento.dia;
+
   const [asignandoA, setAsignandoA] = useState<Estudiante | null>(null);
   const [quitando, setQuitando] = useState<Asignacion | null>(null);
   const [quitandoEnCurso, setQuitandoEnCurso] = useState(false);
@@ -128,6 +137,30 @@ export default function AsignacionPage() {
     verificarPermiso();
     return () => { cancelado = true; };
   }, [router]);
+
+  // El reloj se actualiza cada minuto, para que el turno en curso cambie solo
+  useEffect(() => {
+    const t = setInterval(() => setAhora(new Date()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Quiénes están en el turno en curso
+  useEffect(() => {
+    if (!autorizado) return;
+    if (!turnoEnCurso) { setEnTurno(new Set()); return; }
+    let cancelado = false;
+    supabase
+      .from('horarios_estudiantes')
+      .select('id_estudiante')
+      .eq('dia', diaEnCurso)
+      .eq('turno', turnoEnCurso)
+      .limit(1000)
+      .then(({ data, error }) => {
+        if (cancelado || error) return;
+        setEnTurno(new Set((data ?? []).map((h) => h.id_estudiante as string)));
+      });
+    return () => { cancelado = true; };
+  }, [autorizado, diaEnCurso, turnoEnCurso, recarga]);
 
   // Estudiantes + asignaciones (activas e historial), en bloques de 1000
   useEffect(() => {
@@ -207,6 +240,7 @@ export default function AsignacionPage() {
     const q = normalizar(busqueda);
     const lista = estudiantes.filter((e) => {
       if (nivel && e.nivel_consultorio !== nivel) return false;
+      if (soloDisponibles && !enTurno.has(e.id)) return false;
       if (!q) return true;
       if (campo === 'nombre') return normalizar(e.nombre_estudiante).includes(q);
       if (campo === 'codigo') return normalizar(e.codigo_estudiante).includes(q);
@@ -226,7 +260,7 @@ export default function AsignacionPage() {
       }
       return d || x.nombre_estudiante.localeCompare(y.nombre_estudiante);
     });
-  }, [estudiantes, busqueda, campo, nivel, orden, porEstudiante]);
+  }, [estudiantes, busqueda, campo, nivel, orden, porEstudiante, soloDisponibles, enTurno]);
 
   const paginasTotales = Math.max(1, Math.ceil(filtrados.length / ESTUDIANTES_POR_PAGINA));
   const paginaSegura = Math.min(pagina, paginasTotales);
@@ -291,7 +325,7 @@ export default function AsignacionPage() {
           />
           <select className="admin-select-filtro" value={nivel} onChange={(e) => { setNivel(e.target.value); setPagina(1); }}>
             <option value="">Todos los niveles</option>
-            {NIVELES.map((n) => <option key={n} value={n}>{n}</option>)}
+             {NIVELES.map((n) => <option key={n} value={n}>{etiquetaNivel(n)}</option>)}
           </select>
           <select className="admin-select-filtro" value={orden} onChange={(e) => { setOrden(e.target.value as Orden); setPagina(1); }}>
             <option value="nombre">Orden: nombre (A–Z)</option>
@@ -299,13 +333,33 @@ export default function AsignacionPage() {
             <option value="mas">Más asesorías activas</option>
             <option value="menos">Menos asesorías activas</option>
           </select>
+          <button
+            type="button"
+            className={`btn-chip filtro-ahora${soloDisponibles ? ' activo' : ''}`}
+            aria-pressed={soloDisponibles}
+            title="Mostrar solo a quienes están en turno en este momento"
+            onClick={() => { setSoloDisponibles((v) => !v); setPagina(1); }}
+          >
+            <span className={`punto-turno${turnoEnCurso ? '' : ' apagado'}`} />
+            Disponible ahora
+          </button>
           <span className="admin-contador">{filtrados.length} estudiante(s)</span>
         </div>
+
+        {soloDisponibles && (
+          <p className="texto-secundario" style={{ margin: '0 0 12px' }}>
+            {turnoEnCurso
+              ? `Turno en curso: ${nombreDia(diaEnCurso)}, turno ${turnoEnCurso} (${etiquetaTurno(turnoEnCurso)}).`
+              : `No hay turno en este momento. El próximo es ${textoSiguienteTurno(ahora)}.`}
+          </p>
+        )}
 
         {cargando && estudiantes.length === 0 ? (
           <div className="admin-estado-cargando">Cargando estudiantes...</div>
         ) : filtrados.length === 0 ? (
-          <div className="admin-estado-vacio">No hay estudiantes que coincidan.</div>
+          <div className="admin-estado-vacio">
+            {soloDisponibles && !busqueda && !nivel ? 'No hay estudiantes en turno en este momento.' : 'No hay estudiantes que coincidan.'}
+          </div>
         ) : (
           <div className="admin-table-card" style={{ opacity: cargando ? 0.6 : 1 }}>
             <table className="admin-table admin-table-compacta asig-tabla">
@@ -344,6 +398,11 @@ export default function AsignacionPage() {
                               >
                                 {e.nombre_estudiante}
                               </button>
+                              {enTurno.has(e.id) && (
+                                <span className="badge-turno" title="Está en turno en este momento">
+                                  <span className="punto-turno" />En turno
+                                </span>
+                              )}
                             </td>
                           </>
                         )}
@@ -507,7 +566,7 @@ function ModalAsignar({
     setError(null);
     const numeroAsesoria = busq.recepcion.asesoria_no;
     const obsNueva = observaciones.trim() || null;
-    const { error: err } =
+    const resp =
       accion === 'asignar'
         ? await supabase.rpc('asignar_asesoria', {
             p_asesoria_no: numeroAsesoria,
@@ -523,6 +582,17 @@ function ModalAsignar({
             p_observaciones: motivo.trim(),
             p_observaciones_nueva: obsNueva,
           });
+    let err = resp.error;
+    // "Añadir" (asignar) se queda como asignación normal; solo la reasignación marca la nueva fila
+    if (!err && accion === 'reasignar') {
+      const { error: errMarca } = await supabase
+        .from('asignaciones')
+        .update({ es_reasignacion: true })
+        .eq('id_recepcion', busq.recepcion.id)
+        .eq('id_estudiante', estudiante.id)
+        .eq('activa', true);
+      err = errMarca;
+    }
     setGuardando(false);
     if (err) { setError(err.message); return; }
     onHecho(

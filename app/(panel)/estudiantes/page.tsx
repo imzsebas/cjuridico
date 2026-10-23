@@ -5,8 +5,8 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase'; // ajusta la ruta si tu cliente está en otro lugar
 import PanelTopbar from '@/components/PanelTopbar';
 import Paginacion, { POR_PAGINA } from '@/components/Paginacion';
-
-const NIVELES = ['DERECHO PUBLICO', 'DERECHO PRIVADO', 'DERECHO LABORAL', 'DERECHO PENAL'] as const;
+import { NIVELES, nivelRomano, etiquetaNivel } from '@/lib/niveles';
+import { DIAS, TURNOS, nombreDia } from '@/lib/turnos';
 
 type Estudiante = {
   id: string;
@@ -26,6 +26,11 @@ const VACIO = {
   correo_estudiante: '', nivel_consultorio: NIVELES[0] as string,
 };
 
+const aPar = (clave: string) => {
+  const [dia, turno] = clave.split('-').map(Number);
+  return { dia, turno };
+};
+
 export default function EstudiantesPage() {
   const router = useRouter();
   const [estudiantes, setEstudiantes] = useState<Estudiante[]>([]);
@@ -38,6 +43,15 @@ export default function EstudiantesPage() {
   const [detalle, setDetalle] = useState<Estudiante | null>(null);
   const [casos, setCasos] = useState<CasoAsignado[] | null>(null);
   const [errorCasos, setErrorCasos] = useState<string | null>(null);
+
+  // Horario del estudiante: claves "dia-turno" (p. ej. "2-3" = martes, turno 3)
+  const [horario, setHorario] = useState<Set<string> | null>(null);
+  // Valores de los dos combos para agregar un turno
+  const [diaSel, setDiaSel] = useState('');
+  const [turnoSel, setTurnoSel] = useState('');
+  const [guardandoHorario, setGuardandoHorario] = useState(false);
+  const [errorHorario, setErrorHorario] = useState<string | null>(null);
+  const idDetalle = detalle?.id ?? null;
 
   // --- Búsqueda y filtro ---
   const [busqueda, setBusqueda] = useState('');
@@ -129,6 +143,63 @@ export default function EstudiantesPage() {
     return () => { cancelado = true; };
   }, [detalle]);
 
+  // Horario: se pide solo cuando se abre el modal de un estudiante
+  useEffect(() => {
+    if (!idDetalle) return;
+    let cancelado = false;
+    setHorario(null);
+    setErrorHorario(null);
+    setDiaSel('');
+    setTurnoSel('');
+    supabase
+      .from('horarios_estudiantes')
+      .select('dia, turno')
+      .eq('id_estudiante', idDetalle)
+      .then(({ data, error }) => {
+        if (cancelado) return;
+        if (error) { setErrorHorario(error.message); return; }
+        setHorario(new Set((data ?? []).map((h) => `${h.dia}-${h.turno}`)));
+      });
+    return () => { cancelado = true; };
+  }, [idDetalle]);
+
+  // Turnos asignados, ordenados por día y turno
+  const asignados = horario
+    ? [...horario].map((k) => ({ clave: k, ...aPar(k) })).sort((a, b) => a.dia - b.dia || a.turno - b.turno)
+    : [];
+
+  async function agregarTurno() {
+    if (!detalle || !horario || diaSel === '' || turnoSel === '') return;
+    const clave = `${diaSel}-${turnoSel}`;
+    if (horario.has(clave)) { setErrorHorario('Ese turno ya está asignado.'); return; }
+    setGuardandoHorario(true);
+    setErrorHorario(null);
+    const { error } = await supabase
+      .from('horarios_estudiantes')
+      .insert({ id_estudiante: detalle.id, dia: Number(diaSel), turno: Number(turnoSel) });
+    setGuardandoHorario(false);
+    if (error) { setErrorHorario(error.message); return; }
+    setHorario(new Set(horario).add(clave));
+  }
+
+  async function quitarTurno(clave: string) {
+    if (!detalle || !horario) return;
+    const { dia, turno } = aPar(clave);
+    setGuardandoHorario(true);
+    setErrorHorario(null);
+    const { error } = await supabase
+      .from('horarios_estudiantes')
+      .delete()
+      .eq('id_estudiante', detalle.id)
+      .eq('dia', dia)
+      .eq('turno', turno);
+    setGuardandoHorario(false);
+    if (error) { setErrorHorario(error.message); return; }
+    const copia = new Set(horario);
+    copia.delete(clave);
+    setHorario(copia);
+  }
+
   function abrirEditar(e: Estudiante) {
     setDetalle(null);
     setModal({
@@ -194,7 +265,7 @@ export default function EstudiantesPage() {
           onChange={(e) => { setFiltroNivel(e.target.value); setPagina(1); }}
         >
           <option value="TODOS">Todos los niveles</option>
-          {NIVELES.map((n) => <option key={n} value={n}>{n}</option>)}
+          {NIVELES.map((n) => <option key={n} value={n}>{etiquetaNivel(n)}</option>)}
         </select>
         {!cargando && (
           <span className="admin-contador">
@@ -237,7 +308,7 @@ export default function EstudiantesPage() {
                   <td>{e.codigo_estudiante}</td>
                   <td>{e.telefono_estudiante || <span className="sin-dato">—</span>}</td>
                   <td>{e.correo_estudiante || <span className="sin-dato">—</span>}</td>
-                  <td>{e.nivel_consultorio}</td>
+                  <td>{nivelRomano(e.nivel_consultorio)}</td>
                 </tr>
               ))}
             </tbody>
@@ -260,10 +331,57 @@ export default function EstudiantesPage() {
 
             <div className="caso-datos" style={{ marginBottom: 18 }}>
               <div className="caso-dato"><span>Código</span><p>{detalle.codigo_estudiante || '—'}</p></div>
-              <div className="caso-dato"><span>Nivel de consultorio</span><p>{detalle.nivel_consultorio || '—'}</p></div>
+              <div className="caso-dato"><span>Nivel de consultorio</span><p>{nivelRomano(detalle.nivel_consultorio) || '—'}</p></div>
               <div className="caso-dato"><span>Teléfono</span><p>{detalle.telefono_estudiante || '—'}</p></div>
               <div className="caso-dato"><span>Correo</span><p>{detalle.correo_estudiante || '—'}</p></div>
             </div>
+
+            <h4 className="caso-seccion-titulo">Horario en el consultorio</h4>
+            {errorHorario && <div className="form-message error" style={{ marginBottom: 10 }}>{errorHorario}</div>}
+            {horario === null ? (
+              !errorHorario && <p className="admin-estado-cargando" style={{ margin: '0 0 18px' }}>Cargando horario...</p>
+            ) : (
+              <div style={{ marginBottom: 18 }}>
+                <div className="horario-agregar">
+                  <select className="campo-select" value={diaSel} onChange={(e) => setDiaSel(e.target.value)} aria-label="Día de la semana">
+                    <option value="">Día de la semana</option>
+                    {DIAS.map((d) => <option key={d.id} value={d.id}>{d.nombre}</option>)}
+                  </select>
+                  <select className="campo-select" value={turnoSel} onChange={(e) => setTurnoSel(e.target.value)} aria-label="Turno">
+                    <option value="">Turno</option>
+                    {TURNOS.map((t) => <option key={t.id} value={t.id}>Turno {t.id} · {t.etiqueta}</option>)}
+                  </select>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={agregarTurno}
+                    disabled={diaSel === '' || turnoSel === '' || guardandoHorario}
+                  >
+                    Agregar
+                  </button>
+                </div>
+
+                {asignados.length === 0 ? (
+                  <p className="texto-secundario" style={{ margin: '10px 0 0' }}>Todavía no tiene turnos asignados.</p>
+                ) : (
+                  <div className="horario-chips">
+                    {asignados.map(({ clave, dia, turno }) => (
+                      <span key={clave} className="horario-chip">
+                        {nombreDia(dia)} · Turno {turno}
+                        <button
+                          type="button"
+                          aria-label={`Quitar ${nombreDia(dia)}, turno ${turno}`}
+                          onClick={() => quitarTurno(clave)}
+                          disabled={guardandoHorario}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             <h4 className="caso-seccion-titulo">Asesorías asignadas</h4>
             {errorCasos ? (
@@ -342,7 +460,7 @@ export default function EstudiantesPage() {
                 value={modal.datos.nivel_consultorio}
                 onChange={(e) => setModal({ ...modal, datos: { ...modal.datos, nivel_consultorio: e.target.value } })}
               >
-                {NIVELES.map((n) => <option key={n} value={n}>{n}</option>)}
+                {NIVELES.map((n) => <option key={n} value={n}>{etiquetaNivel(n)}</option>)}
               </select>
             </div>
           </div>
