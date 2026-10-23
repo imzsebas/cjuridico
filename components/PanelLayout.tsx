@@ -47,7 +47,7 @@ type Enlace = {
 
 const ENLACES: Enlace[] = [
   { href: '/recepcion', label: 'Recepción', corto: 'Recepción', grupo: 'Gestión', icono: ICONOS.recepcion, roles: ['administrador', 'monitor'] },
-  { href: '/calendario', label: 'Calendario', corto: 'Horarios', grupo: 'Gestión', icono: ICONOS.calendario, roles: ['administrador', 'monitor'] },
+  { href: '/calendario', label: 'Calendario', corto: 'Horarios', grupo: 'Gestión', icono: ICONOS.calendario, roles: ['administrador'] },
   { href: '/asignacion', label: 'Asignar', corto: 'Asignar', grupo: 'Asignaciones', icono: ICONOS.asignacion, roles: ['administrador'] },
   { accion: 'reparto', label: 'Generar reparto', corto: 'Reparto', grupo: 'Asignaciones', icono: ICONOS.reparto, roles: ['administrador'] },
   { href: '/libro-asesorias', label: 'Libro de asesorías', corto: 'Libro', grupo: 'Registros', icono: ICONOS.libro, roles: ['administrador'] },

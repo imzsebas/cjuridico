@@ -8,7 +8,7 @@ import { NIVELES, etiquetaNivel } from '@/lib/niveles';
 import { DIAS, TURNOS, etiquetaTurno, momentoActual, nombreDia, textoSiguienteTurno } from '@/lib/turnos';
 
 // Calendario semanal: quién está en el consultorio en cada turno (lunes a viernes).
-// El administrador toca un recuadro para asignar varios estudiantes a la vez.
+// Solo el administrador entra aquí y toca un recuadro para asignar varios estudiantes a la vez.
 
 type Fila = {
   id_estudiante: string;
@@ -162,7 +162,6 @@ function ModalTurno({
 export default function CalendarioPage() {
   const router = useRouter();
   const [autorizado, setAutorizado] = useState(false);
-  const [esAdmin, setEsAdmin] = useState(false);
   const [filas, setFilas] = useState<Fila[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -178,7 +177,7 @@ export default function CalendarioPage() {
     return () => clearInterval(t);
   }, []);
 
-  // Pueden entrar el administrador y los monitores (solo el administrador edita)
+  // Solo puede entrar el administrador
   useEffect(() => {
     let cancelado = false;
     async function verificarPermiso() {
@@ -187,8 +186,7 @@ export default function CalendarioPage() {
       if (!user) { if (!cancelado) router.replace('/login'); return; }
       const { data: perfil } = await supabase.from('usuarios').select('rol').eq('id', user.id).single();
       if (cancelado) return;
-      if (!perfil || !['administrador', 'monitor'].includes(perfil.rol)) { router.replace('/login'); return; }
-      setEsAdmin(perfil.rol === 'administrador');
+      if (perfil?.rol !== 'administrador') { router.replace('/login'); return; }
       setAutorizado(true);
     }
     verificarPermiso();
@@ -319,18 +317,14 @@ export default function CalendarioPage() {
                       return (
                         <td
                           key={d.id}
-                          className={`cal-celda${enCurso ? ' cal-celda-ahora' : ''}${esAdmin ? ' cal-celda-editable' : ''}`}
-                          {...(esAdmin
-                            ? {
-                                role: 'button',
-                                tabIndex: 0,
-                                'aria-label': `Asignar estudiantes: ${d.nombre}, turno ${t.id}`,
-                                onClick: abrir,
-                                onKeyDown: (ev: React.KeyboardEvent) => {
-                                  if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); abrir(); }
-                                },
-                              }
-                            : {})}
+                          className={`cal-celda cal-celda-editable${enCurso ? ' cal-celda-ahora' : ''}`}
+                          role="button"
+                          tabIndex={0}
+                          aria-label={`Asignar estudiantes: ${d.nombre}, turno ${t.id}`}
+                          onClick={abrir}
+                          onKeyDown={(ev) => {
+                            if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); abrir(); }
+                          }}
                         >
                           {lista.length > 0 && (
                             <ul className="cal-lista">
