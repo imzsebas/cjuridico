@@ -1,12 +1,11 @@
 'use client';
 
-import { ReactNode, useEffect, useRef, useState } from 'react';
+import { ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { ProveedorSesion, type Sesion } from '@/lib/sesion';
 import ModalReparto from '@/components/ModalReparto';
-
-type Rol = 'administrador' | 'monitor' | string;
 
 const ICONOS = {
   recepcion: (
@@ -37,7 +36,6 @@ const ICONOS = {
 
 type Enlace = {
   href?: string; // si no tiene href, es un botón que ejecuta una acción
-  accion?: 'reparto';
   label: string;
   corto: string;
   grupo: string;
@@ -49,7 +47,7 @@ const ENLACES: Enlace[] = [
   { href: '/recepcion', label: 'Recepción', corto: 'Recepción', grupo: 'Gestión', icono: ICONOS.recepcion, roles: ['administrador', 'monitor'] },
   { href: '/calendario', label: 'Calendario', corto: 'Horarios', grupo: 'Gestión', icono: ICONOS.calendario, roles: ['administrador'] },
   { href: '/asignacion', label: 'Asignar', corto: 'Asignar', grupo: 'Asignaciones', icono: ICONOS.asignacion, roles: ['administrador'] },
-  { accion: 'reparto', label: 'Generar reparto', corto: 'Reparto', grupo: 'Asignaciones', icono: ICONOS.reparto, roles: ['administrador'] },
+  { label: 'Generar reparto', corto: 'Reparto', grupo: 'Asignaciones', icono: ICONOS.reparto, roles: ['administrador'] },
   { href: '/libro-asesorias', label: 'Libro de asesorías', corto: 'Libro', grupo: 'Registros', icono: ICONOS.libro, roles: ['administrador'] },
   { href: '/estudiantes', label: 'Estudiantes', corto: 'Estudiantes', grupo: 'Registros', icono: ICONOS.estudiantes, roles: ['administrador'] },
   { href: '/monitores', label: 'Monitores', corto: 'Monitores', grupo: 'Registros', icono: ICONOS.monitores, roles: ['administrador'] },
@@ -134,32 +132,94 @@ function IndicadorMenu() {
   return <div ref={ref} className="nav-indicator" aria-hidden="true" />;
 }
 
+// Ítem del menú: enlace a una sección, o botón que abre una acción (Generar reparto)
+function ItemMenu({ it, clase, activo, onAccion, children }: {
+  it: Enlace; clase: string; activo: boolean; onAccion: () => void; children: ReactNode;
+}) {
+  return it.href ? (
+    <Link href={it.href} className={`${clase} ${activo ? 'active' : ''}`}>{children}</Link>
+  ) : (
+    <button type="button" className={clase} onClick={onAccion}>{children}</button>
+  );
+}
+
+// Avatar + correo + rol (en el sidebar usa las clases "panel-user-*" y en el drawer móvil "panel-drawer-*")
+function Usuario({ prefijo, inicial, correo, rol }: { prefijo: string; inicial: string; correo: string; rol: string }) {
+  return (
+    <>
+      <div className={`${prefijo}-avatar`}>{inicial}</div>
+      <div style={{ minWidth: 0 }}>
+        <div className={`${prefijo}-name`}>{correo}</div>
+        <div className={`${prefijo}-role`}>{rol}</div>
+      </div>
+    </>
+  );
+}
+
 export default function PanelLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const [rol, setRol] = useState<Rol | null>(null);
-  const [correo, setCorreo] = useState('');
+  // undefined = cargando · null = sin sesión (cada página redirige a /login)
+  const [sesion, setSesion] = useState<Sesion | null | undefined>(undefined);
   const [menuAbierto, setMenuAbierto] = useState(false);
   const [repartoAbierto, setRepartoAbierto] = useState(false);
   const [saliendo, setSaliendo] = useState(false); // animación de cierre de sesión
 
-  useEffect(() => {
-    let cancelado = false;
-    async function verificar() {
-      const { data: { session } } = await supabase.auth.getSession();
-      const user = session?.user;
-      if (!user) return; // cada página ya redirige a /login si no hay sesión
-      const { data: perfil } = await supabase.from('usuarios').select('rol').eq('id', user.id).single();
-      if (cancelado) return;
-      setCorreo(user.email ?? '');
-      setRol(perfil?.rol ?? null);
+  // El rol se vuelve a revisar cada minuto, al volver a la pestaña y al cambiar de pantalla.
+  // Si el administrador le quitó el rol a esta cuenta, se cierra la sesión de inmediato.
+  const saliendoRef = useRef(false);
+  const verificar = useCallback(async () => {
+    if (saliendoRef.current) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
+    if (!user) { setSesion(null); return; }
+    const { data: perfil, error } = await supabase.from('usuarios').select('rol').eq('id', user.id).maybeSingle();
+    if (error || saliendoRef.current) return; // sin conexión: se conserva lo que había
+    const rol = perfil?.rol ?? null;
+    if (rol !== 'administrador' && rol !== 'monitor') {
+      saliendoRef.current = true;
+      sessionStorage.setItem('acceso-retirado', '1'); // el login muestra el aviso
+      await supabase.auth.signOut();
+      router.replace('/login');
+      return;
     }
-    verificar();
-    return () => { cancelado = true; };
-  }, []);
+    setSesion((antes) =>
+      antes && antes.userId === user.id && antes.rol === rol && antes.correo === (user.email ?? '')
+        ? antes
+        : { userId: user.id, correo: user.email ?? '', rol }
+    );
+  }, [router]);
+
+  useEffect(() => {
+    const primera = setTimeout(verificar, 0); // se programa: el estado cambia cuando responde la base, no dentro del efecto
+    const cadaMinuto = setInterval(verificar, 60_000);
+    const alVolver = () => { if (document.visibilityState === 'visible') verificar(); };
+    document.addEventListener('visibilitychange', alVolver);
+    window.addEventListener('focus', alVolver);
+    // La sesión también puede terminar sola (vencida o bloqueada): se manda al login
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((evento) => {
+      if (evento === 'SIGNED_OUT' && !saliendoRef.current) setSesion(null);
+    });
+    return () => {
+      clearTimeout(primera);
+      clearInterval(cadaMinuto);
+      document.removeEventListener('visibilitychange', alVolver);
+      window.removeEventListener('focus', alVolver);
+      subscription.unsubscribe();
+    };
+  }, [verificar]);
+
+  // Al cambiar de pantalla
+  const primeraVez = useRef(true);
+  useEffect(() => {
+    if (primeraVez.current) { primeraVez.current = false; return; }
+    const t = setTimeout(verificar, 0);
+    return () => clearTimeout(t);
+  }, [pathname, verificar]);
 
   async function cerrarSesion() {
     if (saliendo) return;
+    saliendoRef.current = true;
     setMenuAbierto(false);
     setRepartoAbierto(false);
     setSaliendo(true);
@@ -175,10 +235,13 @@ export default function PanelLayout({ children }: { children: ReactNode }) {
     router.push('/login');
   }
 
+  const rol = sesion?.rol ?? null;
+  const correo = sesion?.correo ?? '';
   const items = ENLACES.filter((e) => rol !== null && e.roles.includes(rol));
   const grupos = Array.from(new Set(items.map((i) => i.grupo)));
   const activo = ENLACES.find((e) => e.href === pathname);
   const inicial = (correo.charAt(0) || '?').toUpperCase();
+  const abrirReparto = () => setRepartoAbierto(true);
   const etiquetaRol = rol ? (ETIQUETA_ROL[rol] ?? rol) : '';
 
   return (
@@ -197,30 +260,19 @@ export default function PanelLayout({ children }: { children: ReactNode }) {
           {grupos.map((grupo, i) => (
             <div key={grupo}>
               <span className="panel-nav-label" style={i > 0 ? { marginTop: '1rem' } : undefined}>{grupo}</span>
-              {items.filter((it) => it.grupo === grupo).map((it) =>
-                it.href ? (
-                  <Link key={it.href} href={it.href} className={`panel-nav-item ${pathname === it.href ? 'active' : ''}`}>
-                    {it.icono}
-                    <span className="panel-nav-text">{it.label}</span>
-                  </Link>
-                ) : (
-                  <button key={it.accion} type="button" className="panel-nav-item" onClick={() => setRepartoAbierto(true)}>
-                    {it.icono}
-                    <span className="panel-nav-text">{it.label}</span>
-                  </button>
-                )
-              )}
+              {items.filter((it) => it.grupo === grupo).map((it) => (
+                <ItemMenu key={it.label} it={it} clase="panel-nav-item" activo={pathname === it.href} onAccion={abrirReparto}>
+                  {it.icono}
+                  <span className="panel-nav-text">{it.label}</span>
+                </ItemMenu>
+              ))}
             </div>
           ))}
         </nav>
 
         <div className="panel-sidebar-footer">
           <div className="panel-user-row">
-            <div className="panel-user-avatar">{inicial}</div>
-            <div style={{ minWidth: 0 }}>
-              <div className="panel-user-name">{correo}</div>
-              <div className="panel-user-role">{etiquetaRol}</div>
-            </div>
+            <Usuario prefijo="panel-user" inicial={inicial} correo={correo} rol={etiquetaRol} />
             <button className="panel-logout-btn" onClick={cerrarSesion} title="Cerrar sesión">
               <IconoSalir />
             </button>
@@ -245,11 +297,7 @@ export default function PanelLayout({ children }: { children: ReactNode }) {
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
         </button>
         <div className="panel-drawer-user">
-          <div className="panel-drawer-avatar">{inicial}</div>
-          <div style={{ minWidth: 0 }}>
-            <div className="panel-drawer-name">{correo}</div>
-            <div className="panel-drawer-role">{etiquetaRol}</div>
-          </div>
+          <Usuario prefijo="panel-drawer" inicial={inicial} correo={correo} rol={etiquetaRol} />
         </div>
         <button className="panel-drawer-logout" onClick={cerrarSesion}>
           <IconoSalir />
@@ -258,24 +306,19 @@ export default function PanelLayout({ children }: { children: ReactNode }) {
       </div>
 
       {/* ── CONTENIDO: lo único que cambia entre secciones ── */}
-      <main className="panel-main">{children}</main>
+      <main className="panel-main">
+        <ProveedorSesion value={sesion}>{children}</ProveedorSesion>
+      </main>
 
       {/* ── MENÚ INFERIOR (móvil) ── */}
       <nav className="panel-bottom-nav">
         <div className="panel-bottom-nav-inner">
-          {items.map((it) =>
-            it.href ? (
-              <Link key={it.href} href={it.href} className={`panel-bottom-nav-item ${pathname === it.href ? 'active' : ''}`}>
-                <span className="panel-bottom-nav-icon">{it.icono}</span>
-                <span className="panel-bottom-nav-label">{it.corto}</span>
-              </Link>
-            ) : (
-              <button key={it.accion} type="button" className="panel-bottom-nav-item" onClick={() => setRepartoAbierto(true)}>
-                <span className="panel-bottom-nav-icon">{it.icono}</span>
-                <span className="panel-bottom-nav-label">{it.corto}</span>
-              </button>
-            )
-          )}
+          {items.map((it) => (
+            <ItemMenu key={it.label} it={it} clase="panel-bottom-nav-item" activo={pathname === it.href} onAccion={abrirReparto}>
+              <span className="panel-bottom-nav-icon">{it.icono}</span>
+              <span className="panel-bottom-nav-label">{it.corto}</span>
+            </ItemMenu>
+          ))}
         </div>
       </nav>
 

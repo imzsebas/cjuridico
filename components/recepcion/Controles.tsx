@@ -139,7 +139,7 @@ export function Casilla({ k, label }: { k: string; label: string }) {
 }
 
 // Botón tipo píldora para opciones de elección única
-function Segmento({ marcada, onClick, children }: { marcada: boolean; onClick: () => void; children: ReactNode }) {
+export function Segmento({ marcada, onClick, children }: { marcada: boolean; onClick: () => void; children: ReactNode }) {
   return (
     <button
       type="button"

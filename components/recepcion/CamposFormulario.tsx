@@ -4,12 +4,12 @@
 // Se usa en la pantalla de Recepción (una sección a la vez) y en el modal de edición de Asignación (todas juntas).
 
 import {
-  Casilla, Fila, GrupoUnico, Lista, ListaClaves, Seccion, SiNo, Tarjeta, Texto, useFormulario,
+  Casilla, Fila, GrupoUnico, Lista, ListaClaves, Seccion, Segmento, SiNo, Tarjeta, Texto, useFormulario,
 } from '@/components/recepcion/Controles';
 import { LINEAS_HECHO, Medidor, Valores, partirEnLineas } from '@/lib/formatoRecepcion';
 import {
   AREAS_DERECHO, ASESORIA_REPARTO, COMO_NOS_CONOCIO, DISCAPACIDADES, DOCUMENTOS, ESCOLARIDAD,
-  ESTADO_CIVIL, HECHOS, OCUPACION, POBLACION, SECCIONES, TIPO_IDENTIFICACION,
+  ESTADO_CIVIL, HECHOS, OCUPACION, POBLACION, SECCIONES, TIPO_IDENTIFICACION, type Opcion,
 } from '@/lib/estructuraRecepcion';
 
 const aInputFecha = (f: string) => {
@@ -56,6 +56,23 @@ function Hecho({ n, medidor, obligatorio = false }: { n: number; medidor: Medido
   );
 }
 
+// Sección 3 (Bienes): las preguntas SI/NO y sus campos salen de SECCIONES (lib/estructuraRecepcion).
+// Aquí solo se ajusta lo que se ve distinto en pantalla.
+const ETIQUETA_EN_PANTALLA: Record<string, string> = { direccion_lote: 'Dirección' };
+const CAMPOS_NUMERICOS = ['valor_arriendo'];
+
+function DetalleBien({ campos }: { campos: Opcion[] }) {
+  const textos = campos.map((d) => (
+    <Texto
+      key={d.k}
+      k={d.k}
+      label={ETIQUETA_EN_PANTALLA[d.k] ?? d.label}
+      inputMode={CAMPOS_NUMERICOS.includes(d.k) ? 'numeric' : undefined}
+    />
+  ));
+  return campos.length > 1 ? <Fila>{textos}</Fila> : <>{textos}</>;
+}
+
 // Estado civil + unión marital de hecho (UMH):
 // - Soltero(a): se muestra la pregunta de UMH para que la responda.
 // - Casado(a): la pregunta no se muestra y UMH queda marcada como NO automáticamente.
@@ -85,21 +102,9 @@ function EstadoCivilYUnion() {
       <div className="rf-grupo">
         <div className="rf-grupo-titulo">Estado civil</div>
         <div className="rf-segmentos" role="radiogroup" aria-label="Estado civil">
-          {ESTADO_CIVIL.map((o) => {
-            const marcada = Boolean(valores[o.k]);
-            return (
-              <button
-                key={o.k}
-                type="button"
-                role="radio"
-                aria-checked={marcada}
-                className={`rf-segmento${marcada ? ' marcada' : ''}`}
-                onClick={() => alternar(o.k)}
-              >
-                {o.label}
-              </button>
-            );
-          })}
+          {ESTADO_CIVIL.map((o) => (
+            <Segmento key={o.k} marcada={Boolean(valores[o.k])} onClick={() => alternar(o.k)}>{o.label}</Segmento>
+          ))}
         </div>
       </div>
       {soltero && <SiNo titulo="Unión marital de hecho" kSi="umh_si" kNo="umh_no" />}
@@ -212,26 +217,15 @@ export default function CamposSeccion({
     {/* ───────── 3. Bienes ───────── */}
     {paso === 2 && (
       <Seccion titulo={`3. ${SECCIONES[2].titulo}`}>
-        <SiNo titulo="Vivienda propia o familiar" kSi="vivienda_propia_si" kNo="vivienda_propia_no" limpiar={['direccion_inmueble']}>
-          <Texto k="direccion_inmueble" label="Dirección del inmueble" />
-        </SiNo>
-        <SiNo titulo="Paga arriendo" kSi="paga_arriendo_si" kNo="paga_arriendo_no" limpiar={['valor_arriendo']}>
-          <Texto k="valor_arriendo" label="Valor de arriendo" inputMode="numeric" />
-        </SiNo>
-        <SiNo titulo="Lote propio" kSi="lote_propio_si" kNo="lote_propio_no" limpiar={['direccion_lote']}>
-          <Texto k="direccion_lote" label="Dirección" />
-        </SiNo>
-        <SiNo titulo="Vehículo" kSi="vehiculo_si" kNo="vehiculo_no" limpiar={['vehiculo_placa', 'vehiculo_marca', 'vehiculo_modelo']}>
-          <Fila>
-            <Texto k="vehiculo_placa" label="Placa" />
-            <Texto k="vehiculo_marca" label="Marca" />
-            <Texto k="vehiculo_modelo" label="Modelo" />
-          </Fila>
-        </SiNo>
-        <SiNo titulo="Negocio" kSi="negocio_si" kNo="negocio_no" limpiar={['negocio_especifique']}>
-          <Texto k="negocio_especifique" label="Especifique" />
-        </SiNo>
-        <Texto k="bienes_otro_cual" label="Otro: ¿cuál?" />
+        {SECCIONES[2].items.map((it) =>
+          it.tipo === 'sino' ? (
+            <SiNo key={it.kSi} titulo={it.label} kSi={it.kSi} kNo={it.kNo} limpiar={it.detalle?.map((d) => d.k)}>
+              <DetalleBien campos={it.detalle ?? []} />
+            </SiNo>
+          ) : it.tipo === 'texto' ? (
+            <Texto key={it.k} k={it.k} label={it.label} />
+          ) : null
+        )}
       </Seccion>
     )}
 

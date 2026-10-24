@@ -1,10 +1,12 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { useAhora, usePermiso } from '@/lib/sesion';
+import { difNumerica, formatearFecha, hoyLocal, mensajeDe, normalizar, traerTodo, uno } from '@/lib/utilidades';
 import PanelTopbar from '@/components/PanelTopbar';
 import Paginacion from '@/components/Paginacion';
+import Modal from '@/components/Modal';
 import { NIVELES, etiquetaNivel } from '@/lib/niveles';
 import { etiquetaTurno, momentoActual, nombreDia, textoSiguienteTurno } from '@/lib/turnos';
 
@@ -44,11 +46,9 @@ type Asignacion = {
   naturaleza_asunto: string | null;
 };
 
+type RecepcionBD = { asesoria_no: string | null; area_derecho: string | null; naturaleza_asunto: string | null };
 type FilaAsignacionBD = Omit<Asignacion, 'area_derecho' | 'naturaleza_asunto'> & {
-  recepciones:
-    | { asesoria_no: string | null; area_derecho: string | null; naturaleza_asunto: string | null }
-    | { asesoria_no: string | null; area_derecho: string | null; naturaleza_asunto: string | null }[]
-    | null;
+  recepciones: RecepcionBD | RecepcionBD[] | null;
 };
 
 type Titular = { idAsignacion: string; idEstudiante: string; nombre: string; codigo: string; fecha: string };
@@ -64,40 +64,11 @@ type Busqueda =
       titulares: Titular[];
     };
 
-// Fecha de hoy en la zona horaria del navegador (toISOString usaría UTC y a veces da el día siguiente)
-function hoyLocal(): string {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
-
-function formatearFecha(iso: string | null): string {
-  if (!iso) return '—';
-  const [a, m, d] = iso.slice(0, 10).split('-');
-  return a && m && d ? `${d}/${m}/${a}` : iso;
-}
-
-function normalizar(s: string) {
-  return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
-}
-
-async function traerTodo<T>(
-  pedir: (desde: number, hasta: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>
-): Promise<T[]> {
-  const TAM = 1000;
-  const todo: T[] = [];
-  for (let desde = 0; ; desde += TAM) {
-    const { data, error } = await pedir(desde, desde + TAM - 1);
-    if (error) throw new Error(error.message);
-    todo.push(...(data ?? []));
-    if ((data?.length ?? 0) < TAM) break;
-  }
-  return todo;
-}
+const NADIE = new Set<string>();
 
 export default function AsignacionPage() {
-  const router = useRouter();
-  const [autorizado, setAutorizado] = useState(false);
+  // Solo el administrador puede entrar aquí (a los demás se les manda a Recepción)
+  const autorizado = !!usePermiso(['administrador'], '/recepcion');
   const [estudiantes, setEstudiantes] = useState<Estudiante[]>([]);
   const [asignaciones, setAsignaciones] = useState<Asignacion[]>([]);
   const [cargando, setCargando] = useState(true);
@@ -112,42 +83,20 @@ export default function AsignacionPage() {
 
   // "Disponible ahora": estudiantes cuyo horario incluye el turno en curso (hora de Colombia)
   const [soloDisponibles, setSoloDisponibles] = useState(false);
-  const [ahora, setAhora] = useState(() => new Date());
-  const [enTurno, setEnTurno] = useState<Set<string>>(new Set());
-  const momento = momentoActual(ahora);
-  const turnoEnCurso = momento.turno;
-  const diaEnCurso = momento.dia;
+  const ahora = useAhora(); // null hasta que carga en el navegador
+  const [enTurnoDatos, setEnTurno] = useState<Set<string>>(NADIE);
+  const momento = ahora ? momentoActual(ahora) : null;
+  const turnoEnCurso = momento?.turno ?? null;
+  const diaEnCurso = momento?.dia ?? 0;
+  const enTurno = turnoEnCurso ? enTurnoDatos : NADIE;
 
   const [asignandoA, setAsignandoA] = useState<Estudiante | null>(null);
   const [quitando, setQuitando] = useState<Asignacion | null>(null);
   const [quitandoEnCurso, setQuitandoEnCurso] = useState(false);
 
-  // Solo el administrador puede entrar aquí
+  // Quiénes están en el turno en curso (el reloj cambia cada minuto, así que el turno se actualiza solo)
   useEffect(() => {
-    let cancelado = false;
-    async function verificarPermiso() {
-      const { data: { session } } = await supabase.auth.getSession();
-      const user = session?.user;
-      if (!user) { if (!cancelado) router.replace('/login'); return; }
-      const { data: perfil } = await supabase.from('usuarios').select('rol').eq('id', user.id).single();
-      if (cancelado) return;
-      if (!perfil || perfil.rol !== 'administrador') { router.replace('/recepcion'); return; }
-      setAutorizado(true);
-    }
-    verificarPermiso();
-    return () => { cancelado = true; };
-  }, [router]);
-
-  // El reloj se actualiza cada minuto, para que el turno en curso cambie solo
-  useEffect(() => {
-    const t = setInterval(() => setAhora(new Date()), 60_000);
-    return () => clearInterval(t);
-  }, []);
-
-  // Quiénes están en el turno en curso
-  useEffect(() => {
-    if (!autorizado) return;
-    if (!turnoEnCurso) { setEnTurno(new Set()); return; }
+    if (!autorizado || !turnoEnCurso) return;
     let cancelado = false;
     supabase
       .from('horarios_estudiantes')
@@ -192,7 +141,7 @@ export default function AsignacionPage() {
         setEstudiantes(ests);
         setAsignaciones(
           asigs.map((r) => {
-            const rec = Array.isArray(r.recepciones) ? r.recepciones[0] : r.recepciones;
+            const rec = uno(r.recepciones);
             return {
               id: r.id,
               id_estudiante: r.id_estudiante,
@@ -208,7 +157,7 @@ export default function AsignacionPage() {
           })
         );
       } catch (e) {
-        if (!cancelado) setMensaje({ tipo: 'error', texto: e instanceof Error ? e.message : 'No se pudieron cargar los datos.' });
+        if (!cancelado) setMensaje({ tipo: 'error', texto: mensajeDe(e, 'No se pudieron cargar los datos.') });
       }
       if (!cancelado) setCargando(false);
     }
@@ -226,9 +175,7 @@ export default function AsignacionPage() {
     mapa.forEach((lista) =>
       lista.sort((x, y) => {
         if (x.activa !== y.activa) return x.activa ? -1 : 1;
-        const nx = Number(x.asesoria_no), ny = Number(y.asesoria_no);
-        if (!Number.isNaN(nx) && !Number.isNaN(ny) && nx !== ny) return ny - nx;
-        return (y.fecha_asignacion || '').localeCompare(x.fecha_asignacion || '');
+        return difNumerica(y.asesoria_no, x.asesoria_no) || (y.fecha_asignacion || '').localeCompare(x.fecha_asignacion || '');
       })
     );
     return mapa;
@@ -350,7 +297,7 @@ export default function AsignacionPage() {
           <p className="texto-secundario" style={{ margin: '0 0 12px' }}>
             {turnoEnCurso
               ? `Turno en curso: ${nombreDia(diaEnCurso)}, turno ${turnoEnCurso} (${etiquetaTurno(turnoEnCurso)}).`
-              : `No hay turno en este momento. El próximo es ${textoSiguienteTurno(ahora)}.`}
+              : ahora && `No hay turno en este momento. El próximo es ${textoSiguienteTurno(ahora)}.`}
           </p>
         )}
 
@@ -473,24 +420,24 @@ export default function AsignacionPage() {
         )}
 
         {quitando && (
-          <div className="modal-overlay" onClick={() => !quitandoEnCurso && setQuitando(null)}>
-            <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-              <div className="modal-card-cuerpo">
-                <h3>Quitar asignación</h3>
-                <p className="texto-secundario" style={{ marginTop: 0 }}>
-                  Se borrará la asesoría N° <strong>{quitando.asesoria_no || 'sin número'}</strong> de{' '}
-                  <strong>{nombreQuitando || 'este estudiante'}</strong> sin dejar historial. Úsalo solo para corregir un error.
-                </p>
-                <p className="texto-secundario" style={{ marginBottom: 0 }}>Esta acción no se puede deshacer.</p>
-              </div>
-              <div className="modal-acciones modal-acciones-compactas">
+          <Modal
+            onFuera={() => !quitandoEnCurso && setQuitando(null)}
+            acciones={
+              <>
                 <button className="btn-secundario" onClick={() => setQuitando(null)} disabled={quitandoEnCurso}>Cancelar</button>
                 <button className="btn-peligro" onClick={confirmarQuitar} disabled={quitandoEnCurso}>
                   {quitandoEnCurso ? 'Quitando...' : 'Quitar'}
                 </button>
-              </div>
-            </div>
-          </div>
+              </>
+            }
+          >
+            <h3>Quitar asignación</h3>
+            <p className="texto-secundario" style={{ marginTop: 0 }}>
+              Se borrará la asesoría N° <strong>{quitando.asesoria_no || 'sin número'}</strong> de{' '}
+              <strong>{nombreQuitando || 'este estudiante'}</strong> sin dejar historial. Úsalo solo para corregir un error.
+            </p>
+            <p className="texto-secundario" style={{ marginBottom: 0 }}>Esta acción no se puede deshacer.</p>
+          </Modal>
         )}
       </div>
     </div>
@@ -541,7 +488,7 @@ function ModalAsignar({
       if (cancelado) return;
       if (e2) { setBusq({ estado: 'error', texto: e2.message }); return; }
       const titulares: Titular[] = (activas ?? []).map((a) => {
-        const est = Array.isArray(a.estudiantes) ? a.estudiantes[0] : a.estudiantes;
+        const est = uno(a.estudiantes);
         return {
           idAsignacion: a.id,
           idEstudiante: a.id_estudiante,
@@ -582,19 +529,9 @@ function ModalAsignar({
             p_observaciones: motivo.trim(),
             p_observaciones_nueva: obsNueva,
           });
-    let err = resp.error;
-    // "Añadir" (asignar) se queda como asignación normal; solo la reasignación marca la nueva fila
-    if (!err && accion === 'reasignar') {
-      const { error: errMarca } = await supabase
-        .from('asignaciones')
-        .update({ es_reasignacion: true })
-        .eq('id_recepcion', busq.recepcion.id)
-        .eq('id_estudiante', estudiante.id)
-        .eq('activa', true);
-      err = errMarca;
-    }
+    // La función reasignar_asesoria ya deja la fila nueva marcada como reasignación (es_reasignacion = true)
     setGuardando(false);
-    if (err) { setError(err.message); return; }
+    if (resp.error) { setError(resp.error.message); return; }
     onHecho(
       accion === 'asignar'
         ? `Asesoría N° ${numeroAsesoria} asignada a ${estudiante.nombre_estudiante}.`
@@ -602,166 +539,161 @@ function ModalAsignar({
     );
   }
 
+  const acciones =
+    paso === 'datos' ? (
+      <>
+        <button className="btn-secundario" onClick={onCerrar} disabled={guardando}>Cancelar</button>
+        {busq.estado === 'ok' && titulares.length > 0 && !yaLaTiene ? (
+          <>
+            <button className="btn-secundario" onClick={() => { setError(null); setPaso('reasignar'); }} disabled={guardando}>
+              Reasignar
+            </button>
+            <button className="btn-primary" onClick={() => ejecutar('asignar')} disabled={guardando}>
+              {guardando ? 'Guardando...' : 'Añadir'}
+            </button>
+          </>
+        ) : (
+          <button
+            className="btn-primary"
+            onClick={() => ejecutar('asignar')}
+            disabled={guardando || busq.estado !== 'ok' || yaLaTiene}
+          >
+            {guardando ? 'Guardando...' : 'Asignar'}
+          </button>
+        )}
+      </>
+    ) : (
+      <>
+        <button className="btn-secundario" onClick={() => { setError(null); setPaso('datos'); }} disabled={guardando}>Volver</button>
+        <button
+          className="btn-primary"
+          onClick={() => ejecutar('reasignar')}
+          disabled={guardando || !salienteEfectivo || !motivo.trim()}
+        >
+          {guardando ? 'Guardando...' : 'Confirmar reasignación'}
+        </button>
+      </>
+    );
+
   return (
-    <div className="modal-overlay" onClick={() => !guardando && onCerrar()}>
-      <div className="modal-card modal-card-ancho" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-card-cuerpo">
-          <h3>{paso === 'reasignar' ? 'Reasignar asesoría' : 'Asignar asesoría'}</h3>
-          <p className="texto-secundario" style={{ marginTop: -8 }}>
-            Estudiante: <strong>{estudiante.nombre_estudiante}</strong> ({estudiante.codigo_estudiante})
+    <Modal clase="modal-card-ancho" onFuera={() => !guardando && onCerrar()} acciones={acciones}>
+      <h3>{paso === 'reasignar' ? 'Reasignar asesoría' : 'Asignar asesoría'}</h3>
+      <p className="texto-secundario" style={{ marginTop: -8 }}>
+        Estudiante: <strong>{estudiante.nombre_estudiante}</strong> ({estudiante.codigo_estudiante})
+      </p>
+
+      {paso === 'datos' && (
+        <>
+          <div className="field">
+            <label htmlFor="asig-numero">N° de asesoría</label>
+            <input
+              id="asig-numero"
+              type="text"
+              inputMode="numeric"
+              autoFocus
+              autoComplete="off"
+              value={numero}
+              onChange={(e) => {
+                setNumero(e.target.value);
+                setBusq({ estado: e.target.value.trim() ? 'buscando' : 'vacio' });
+                setError(null);
+              }}
+            />
+            {busq.estado === 'buscando' && <p className="asig-ayuda">Buscando...</p>}
+            {busq.estado === 'noexiste' && <p className="asig-ayuda asig-ayuda-error">No existe una asesoría con el N° {numero.trim()}.</p>}
+            {busq.estado === 'error' && <p className="asig-ayuda asig-ayuda-error">{busq.texto}</p>}
+          </div>
+
+          {busq.estado === 'ok' && (
+            <div className="asig-datos-asesoria">
+              <div><span>Usuario</span><strong>{busq.recepcion.nombres_apellidos || '—'}</strong></div>
+              <div><span>Área</span><strong>{busq.recepcion.area_derecho || '—'}</strong></div>
+              <div className="largo"><span>Asunto</span><strong>{busq.recepcion.naturaleza_asunto || '—'}</strong></div>
+            </div>
+          )}
+
+          <div className="field">
+            <label htmlFor="asig-fecha">Fecha de asignación</label>
+            <input id="asig-fecha" type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+          </div>
+
+          <div className="field">
+            <label htmlFor="asig-obs">Observaciones (opcional)</label>
+            <textarea
+              id="asig-obs"
+              className="asig-textarea"
+              rows={2}
+              value={observaciones}
+              onChange={(e) => setObservaciones(e.target.value)}
+            />
+          </div>
+
+          {busq.estado === 'ok' && titulares.length > 0 && (
+            <div className="asig-aviso">
+              {yaLaTiene ? (
+                <strong>Este estudiante ya tiene activa esta asesoría.</strong>
+              ) : (
+                <>
+                  <strong>Esta asesoría ya está asignada a:</strong>
+                  <ul>
+                    {titulares.map((t) => (
+                      <li key={t.idAsignacion}>
+                        {t.nombre} <span>(desde {formatearFecha(t.fecha)})</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p>
+                    <b>Añadir</b> la deja con varios estudiantes a la vez. <b>Reasignar</b> se la quita a {titulares.length === 1 ? 'ese estudiante' : 'uno de ellos'} y se la da a {estudiante.nombre_estudiante}.
+                  </p>
+                </>
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {paso === 'reasignar' && busq.estado === 'ok' && (
+        <>
+          <p className="texto-secundario" style={{ marginTop: 0 }}>
+            Asesoría N° <strong>{busq.recepcion.asesoria_no}</strong> → pasa a <strong>{estudiante.nombre_estudiante}</strong>.
           </p>
 
-          {paso === 'datos' && (
-            <>
-              <div className="field">
-                <label htmlFor="asig-numero">N° de asesoría</label>
-                <input
-                  id="asig-numero"
-                  type="text"
-                  inputMode="numeric"
-                  autoFocus
-                  autoComplete="off"
-                  value={numero}
-                  onChange={(e) => {
-                    setNumero(e.target.value);
-                    setBusq({ estado: e.target.value.trim() ? 'buscando' : 'vacio' });
-                    setError(null);
-                  }}
-                />
-                {busq.estado === 'buscando' && <p className="asig-ayuda">Buscando...</p>}
-                {busq.estado === 'noexiste' && <p className="asig-ayuda asig-ayuda-error">No existe una asesoría con el N° {numero.trim()}.</p>}
-                {busq.estado === 'error' && <p className="asig-ayuda asig-ayuda-error">{busq.texto}</p>}
-              </div>
+          <div className="field">
+            <label>{titulares.length === 1 ? 'Se le quita a' : 'Elige a quién se le quita'}</label>
+            <div className="asig-opciones">
+              {titulares.map((t) => (
+                <label key={t.idAsignacion} className={`asig-opcion${salienteEfectivo === t.idEstudiante ? ' elegida' : ''}`}>
+                  <input
+                    type="radio"
+                    name="saliente"
+                    checked={salienteEfectivo === t.idEstudiante}
+                    onChange={() => setSaliente(t.idEstudiante)}
+                    disabled={titulares.length === 1}
+                  />
+                  <span>{t.nombre}</span>
+                  <span className="asig-opcion-fecha">desde {formatearFecha(t.fecha)}</span>
+                </label>
+              ))}
+            </div>
+          </div>
 
-              {busq.estado === 'ok' && (
-                <div className="asig-datos-asesoria">
-                  <div><span>Usuario</span><strong>{busq.recepcion.nombres_apellidos || '—'}</strong></div>
-                  <div><span>Área</span><strong>{busq.recepcion.area_derecho || '—'}</strong></div>
-                  <div className="largo"><span>Asunto</span><strong>{busq.recepcion.naturaleza_asunto || '—'}</strong></div>
-                </div>
-              )}
+          <div className="field">
+            <label htmlFor="asig-motivo">Observación (obligatoria)</label>
+            <textarea
+              id="asig-motivo"
+              className="asig-textarea"
+              rows={3}
+              autoFocus
+              placeholder="Por qué se le quita la asesoría..."
+              value={motivo}
+              onChange={(e) => setMotivo(e.target.value)}
+            />
+            <p className="asig-ayuda">Queda en la fila del estudiante que la pierde, que se conserva en rojo como historial.</p>
+          </div>
+        </>
+      )}
 
-              <div className="field">
-                <label htmlFor="asig-fecha">Fecha de asignación</label>
-                <input id="asig-fecha" type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
-              </div>
-
-              <div className="field">
-                <label htmlFor="asig-obs">Observaciones (opcional)</label>
-                <textarea
-                  id="asig-obs"
-                  className="asig-textarea"
-                  rows={2}
-                  value={observaciones}
-                  onChange={(e) => setObservaciones(e.target.value)}
-                />
-              </div>
-
-              {busq.estado === 'ok' && titulares.length > 0 && (
-                <div className="asig-aviso">
-                  {yaLaTiene ? (
-                    <strong>Este estudiante ya tiene activa esta asesoría.</strong>
-                  ) : (
-                    <>
-                      <strong>Esta asesoría ya está asignada a:</strong>
-                      <ul>
-                        {titulares.map((t) => (
-                          <li key={t.idAsignacion}>
-                            {t.nombre} <span>(desde {formatearFecha(t.fecha)})</span>
-                          </li>
-                        ))}
-                      </ul>
-                      <p>
-                        <b>Añadir</b> la deja con varios estudiantes a la vez. <b>Reasignar</b> se la quita a {titulares.length === 1 ? 'ese estudiante' : 'uno de ellos'} y se la da a {estudiante.nombre_estudiante}.
-                      </p>
-                    </>
-                  )}
-                </div>
-              )}
-            </>
-          )}
-
-          {paso === 'reasignar' && busq.estado === 'ok' && (
-            <>
-              <p className="texto-secundario" style={{ marginTop: 0 }}>
-                Asesoría N° <strong>{busq.recepcion.asesoria_no}</strong> → pasa a <strong>{estudiante.nombre_estudiante}</strong>.
-              </p>
-
-              <div className="field">
-                <label>{titulares.length === 1 ? 'Se le quita a' : 'Elige a quién se le quita'}</label>
-                <div className="asig-opciones">
-                  {titulares.map((t) => (
-                    <label key={t.idAsignacion} className={`asig-opcion${salienteEfectivo === t.idEstudiante ? ' elegida' : ''}`}>
-                      <input
-                        type="radio"
-                        name="saliente"
-                        checked={salienteEfectivo === t.idEstudiante}
-                        onChange={() => setSaliente(t.idEstudiante)}
-                        disabled={titulares.length === 1}
-                      />
-                      <span>{t.nombre}</span>
-                      <span className="asig-opcion-fecha">desde {formatearFecha(t.fecha)}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div className="field">
-                <label htmlFor="asig-motivo">Observación (obligatoria)</label>
-                <textarea
-                  id="asig-motivo"
-                  className="asig-textarea"
-                  rows={3}
-                  autoFocus
-                  placeholder="Por qué se le quita la asesoría..."
-                  value={motivo}
-                  onChange={(e) => setMotivo(e.target.value)}
-                />
-                <p className="asig-ayuda">Queda en la fila del estudiante que la pierde, que se conserva en rojo como historial.</p>
-              </div>
-            </>
-          )}
-
-          {error && <div className="form-message error" style={{ marginBottom: 0 }}>{error}</div>}
-        </div>
-
-        <div className="modal-acciones modal-acciones-compactas">
-          {paso === 'datos' ? (
-            <>
-              <button className="btn-secundario" onClick={onCerrar} disabled={guardando}>Cancelar</button>
-              {busq.estado === 'ok' && titulares.length > 0 && !yaLaTiene ? (
-                <>
-                  <button className="btn-secundario" onClick={() => { setError(null); setPaso('reasignar'); }} disabled={guardando}>
-                    Reasignar
-                  </button>
-                  <button className="btn-primary" onClick={() => ejecutar('asignar')} disabled={guardando}>
-                    {guardando ? 'Guardando...' : 'Añadir'}
-                  </button>
-                </>
-              ) : (
-                <button
-                  className="btn-primary"
-                  onClick={() => ejecutar('asignar')}
-                  disabled={guardando || busq.estado !== 'ok' || yaLaTiene}
-                >
-                  {guardando ? 'Guardando...' : 'Asignar'}
-                </button>
-              )}
-            </>
-          ) : (
-            <>
-              <button className="btn-secundario" onClick={() => { setError(null); setPaso('datos'); }} disabled={guardando}>Volver</button>
-              <button
-                className="btn-primary"
-                onClick={() => ejecutar('reasignar')}
-                disabled={guardando || !salienteEfectivo || !motivo.trim()}
-              >
-                {guardando ? 'Guardando...' : 'Confirmar reasignación'}
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
+      {error && <div className="form-message error" style={{ marginBottom: 0 }}>{error}</div>}
+    </Modal>
   );
 }

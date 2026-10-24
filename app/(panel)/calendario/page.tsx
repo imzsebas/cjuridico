@@ -1,9 +1,11 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { useAhora, usePermiso } from '@/lib/sesion';
+import { mensajeDe, normalizar, traerTodo, uno } from '@/lib/utilidades';
 import PanelTopbar from '@/components/PanelTopbar';
+import Modal from '@/components/Modal';
 import { NIVELES, etiquetaNivel } from '@/lib/niveles';
 import { DIAS, TURNOS, etiquetaTurno, momentoActual, nombreDia, textoSiguienteTurno } from '@/lib/turnos';
 
@@ -19,8 +21,6 @@ type Fila = {
 
 type Persona = { id: string; nombre: string; nivel: string };
 type EstudianteLista = { id: string; nombre_estudiante: string };
-
-const normalizar = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
 
 // ---------------------------------------------------------------------------
 // Modal: lista de estudiantes para asignar a un turno
@@ -40,36 +40,16 @@ function ModalTurno({
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Todos los estudiantes, en bloques de 1000
+  // Todos los estudiantes
   useEffect(() => {
     let cancelado = false;
-    async function cargar() {
-      const TAM = 1000;
-      const todos: EstudianteLista[] = [];
-      for (let ini = 0; ; ini += TAM) {
-        const { data, error } = await supabase
-          .from('estudiantes')
-          .select('id, nombre_estudiante')
-          .order('nombre_estudiante')
-          .order('id')
-          .range(ini, ini + TAM - 1);
-        if (cancelado) return;
-        if (error) { setError(error.message); setEstudiantes([]); return; }
-        todos.push(...(data ?? []));
-        if ((data?.length ?? 0) < TAM) break;
-      }
-      setEstudiantes(todos);
-    }
-    cargar();
+    traerTodo<EstudianteLista>((d, h) =>
+      supabase.from('estudiantes').select('id, nombre_estudiante').order('nombre_estudiante').order('id').range(d, h)
+    )
+      .then((todos) => { if (!cancelado) setEstudiantes(todos); })
+      .catch((e) => { if (!cancelado) { setError(mensajeDe(e)); setEstudiantes([]); } });
     return () => { cancelado = true; };
   }, []);
-
-  // Cerrar con Escape
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCerrar(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onCerrar]);
 
   const visibles = useMemo(() => {
     const q = normalizar(busqueda);
@@ -110,49 +90,48 @@ function ModalTurno({
   }
 
   return (
-    <div className="modal-overlay" onClick={onCerrar}>
-      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-card-cuerpo">
-          <h3>{nombreDia(dia)} · Turno {turno}</h3>
-          <p className="texto-secundario" style={{ margin: '-6px 0 14px' }}>{etiquetaTurno(turno)}</p>
-
-          <input
-            type="text"
-            className="admin-input-busqueda"
-            style={{ width: '100%', marginBottom: 12 }}
-            placeholder="Buscar estudiante por nombre..."
-            value={busqueda}
-            onChange={(e) => setBusqueda(e.target.value)}
-            autoFocus
-          />
-
-          {error && <div className="form-message error" style={{ marginBottom: 10 }}>{error}</div>}
-
-          {estudiantes === null ? (
-            <p className="admin-estado-cargando" style={{ margin: 0 }}>Cargando estudiantes...</p>
-          ) : visibles.length === 0 ? (
-            <p className="admin-estado-vacio" style={{ margin: 0 }}>No se encontraron estudiantes.</p>
-          ) : (
-            <div className="sel-lista">
-              {visibles.map((e) => (
-                <label key={e.id} className="sel-item">
-                  <input type="checkbox" checked={seleccion.has(e.id)} onChange={() => alternar(e.id)} />
-                  <span className="chk-caja" />
-                  <span>{e.nombre_estudiante}</span>
-                </label>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="modal-acciones modal-acciones-compactas">
+    <Modal
+      onFuera={onCerrar}
+      acciones={
+        <>
           <button className="btn-secundario" onClick={onCerrar} disabled={guardando}>Cancelar</button>
           <button className="btn-primary" onClick={guardar} disabled={guardando || estudiantes === null}>
             {guardando ? 'Guardando...' : 'Guardar turnos'}
           </button>
+        </>
+      }
+    >
+      <h3>{nombreDia(dia)} · Turno {turno}</h3>
+      <p className="texto-secundario" style={{ margin: '-6px 0 14px' }}>{etiquetaTurno(turno)}</p>
+
+      <input
+        type="text"
+        className="admin-input-busqueda"
+        style={{ width: '100%', marginBottom: 12 }}
+        placeholder="Buscar estudiante por nombre..."
+        value={busqueda}
+        onChange={(e) => setBusqueda(e.target.value)}
+        autoFocus
+      />
+
+      {error && <div className="form-message error" style={{ marginBottom: 10 }}>{error}</div>}
+
+      {estudiantes === null ? (
+        <p className="admin-estado-cargando" style={{ margin: 0 }}>Cargando estudiantes...</p>
+      ) : visibles.length === 0 ? (
+        <p className="admin-estado-vacio" style={{ margin: 0 }}>No se encontraron estudiantes.</p>
+      ) : (
+        <div className="sel-lista">
+          {visibles.map((e) => (
+            <label key={e.id} className="sel-item">
+              <input type="checkbox" checked={seleccion.has(e.id)} onChange={() => alternar(e.id)} />
+              <span className="chk-caja" />
+              <span>{e.nombre_estudiante}</span>
+            </label>
+          ))}
         </div>
-      </div>
-    </div>
+      )}
+    </Modal>
   );
 }
 
@@ -160,62 +139,32 @@ function ModalTurno({
 // Página
 // ---------------------------------------------------------------------------
 export default function CalendarioPage() {
-  const router = useRouter();
-  const [autorizado, setAutorizado] = useState(false);
+  // Solo puede entrar el administrador
+  const autorizado = !!usePermiso(['administrador']);
   const [filas, setFilas] = useState<Fila[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busqueda, setBusqueda] = useState('');
   const [nivel, setNivel] = useState('');
-  const [ahora, setAhora] = useState(() => new Date());
+  const ahora = useAhora(); // null hasta que carga en el navegador (evita el error de hidratación)
   const [recarga, setRecarga] = useState(0);
   const [celdaModal, setCeldaModal] = useState<{ dia: number; turno: number } | null>(null);
 
-  // Reloj: se actualiza cada minuto para resaltar el turno en curso
-  useEffect(() => {
-    const t = setInterval(() => setAhora(new Date()), 60_000);
-    return () => clearInterval(t);
-  }, []);
-
-  // Solo puede entrar el administrador
-  useEffect(() => {
-    let cancelado = false;
-    async function verificarPermiso() {
-      const { data: { session } } = await supabase.auth.getSession();
-      const user = session?.user;
-      if (!user) { if (!cancelado) router.replace('/login'); return; }
-      const { data: perfil } = await supabase.from('usuarios').select('rol').eq('id', user.id).single();
-      if (cancelado) return;
-      if (perfil?.rol !== 'administrador') { router.replace('/login'); return; }
-      setAutorizado(true);
-    }
-    verificarPermiso();
-    return () => { cancelado = true; };
-  }, [router]);
-
-  // Todos los horarios, en bloques de 1000
+  // Todos los horarios
   useEffect(() => {
     if (!autorizado) return;
     let cancelado = false;
-    async function cargar() {
-      setCargando(true);
-      const TAM = 1000;
-      const todas: Fila[] = [];
-      for (let ini = 0; ; ini += TAM) {
-        const { data, error } = await supabase
-          .from('horarios_estudiantes')
-          .select('id_estudiante, dia, turno, estudiantes ( nombre_estudiante, nivel_consultorio )')
-          .order('id')
-          .range(ini, ini + TAM - 1);
-        if (cancelado) return;
-        if (error) { setError(error.message); setCargando(false); return; }
-        todas.push(...((data ?? []) as unknown as Fila[]));
-        if ((data?.length ?? 0) < TAM) break;
-      }
-      setFilas(todas);
-      setCargando(false);
-    }
-    cargar();
+    traerTodo<Fila>((d, h) =>
+      supabase
+        .from('horarios_estudiantes')
+        .select('id_estudiante, dia, turno, estudiantes ( nombre_estudiante, nivel_consultorio )')
+        .order('id')
+        .range(d, h)
+        .overrideTypes<Fila[], { merge: false }>()
+    )
+      .then((todas) => { if (!cancelado) setFilas(todas); })
+      .catch((e) => { if (!cancelado) setError(mensajeDe(e)); })
+      .finally(() => { if (!cancelado) setCargando(false); });
     return () => { cancelado = true; };
   }, [autorizado, recarga]);
 
@@ -224,7 +173,7 @@ export default function CalendarioPage() {
     const q = normalizar(busqueda);
     const mapa = new Map<string, Persona[]>();
     filas.forEach((f) => {
-      const est = Array.isArray(f.estudiantes) ? f.estudiantes[0] : f.estudiantes;
+      const est = uno(f.estudiantes);
       if (!est) return;
       if (nivel && est.nivel_consultorio !== nivel) return;
       if (q && !normalizar(est.nombre_estudiante).includes(q)) return;
@@ -237,7 +186,7 @@ export default function CalendarioPage() {
   }, [filas, busqueda, nivel]);
 
   const estudiantesConHorario = useMemo(() => new Set(filas.map((f) => f.id_estudiante)).size, [filas]);
-  const momento = momentoActual(ahora);
+  const momento = ahora ? momentoActual(ahora) : { dia: 0, turno: null };
   const enTurno = momento.turno ? (celdas.get(`${momento.dia}-${momento.turno}`) ?? []).length : 0;
 
   // Ids asignados a la celda abierta, sin aplicar los filtros de la página
@@ -263,7 +212,7 @@ export default function CalendarioPage() {
                 <strong>{enTurno}</strong> {enTurno === 1 ? 'estudiante en turno' : 'estudiantes en turno'}
               </span>
             </>
-          ) : (
+          ) : ahora && (
             <>
               <span className="punto-turno apagado" />
               <span>

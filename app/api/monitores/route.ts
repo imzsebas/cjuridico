@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { ES_CORREO, ES_UUID, MIN_PASSWORD, exigirAdministrador, json } from '@/lib/servidorAdmin';
+import { mensajeDe, traerTodo } from '@/lib/utilidades';
 
 // GET /api/monitores → monitores activos (rol = 'monitor') con los datos de su ficha de estudiante.
 export async function GET(req: NextRequest) {
@@ -30,17 +31,14 @@ export async function GET(req: NextRequest) {
   //    No se guarda nada; si dos estudiantes comparten correo, no se adivina.
   const porCorreo = new Map<string, Ficha | null>();
   if ((usuarios ?? []).some((u) => !u.id_estudiante)) {
-    const TAM = 1000;
-    for (let desde = 0; ; desde += TAM) {
-      const { data: lote, error: errLote } = await admin
-        .from('estudiantes').select(cols).order('id').range(desde, desde + TAM - 1);
-      if (errLote) return json({ error: errLote.message }, 500);
-      (lote ?? []).forEach((e) => {
+    try {
+      const todas = await traerTodo<Ficha>((d, h) => admin.from('estudiantes').select(cols).order('id').range(d, h));
+      todas.forEach((e) => {
         const c = (e.correo_estudiante ?? '').trim().toLowerCase();
-        if (!c) return;
-        porCorreo.set(c, porCorreo.has(c) ? null : e);
+        if (c) porCorreo.set(c, porCorreo.has(c) ? null : e);
       });
-      if ((lote?.length ?? 0) < TAM) break;
+    } catch (e) {
+      return json({ error: mensajeDe(e) }, 500);
     }
   }
 

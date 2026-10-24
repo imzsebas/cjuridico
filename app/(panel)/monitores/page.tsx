@@ -1,19 +1,15 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { usePermiso } from '@/lib/sesion';
+import { mensajeDe, normalizar, traerTodo } from '@/lib/utilidades';
 import PanelTopbar from '@/components/PanelTopbar';
 import Paginacion, { POR_PAGINA } from '@/components/Paginacion';
-import {
-  Monitor,
-  asignarMonitores,
-  editarCredenciales,
-  generarPassword,
-  listarMonitores,
-  quitarRolMonitor,
-} from '@/lib/apiMonitores';
-import { NIVELES, nivelRomano, etiquetaNivel } from '@/lib/niveles';
+import Modal from '@/components/Modal';
+import { Campo, CampoNivel, CampoPassword } from '@/components/Campo';
+import { Monitor, asignarMonitores, editarCredenciales, generarPassword, listarMonitores, quitarRolMonitor } from '@/lib/apiMonitores';
+import { NIVELES, nivelRomano } from '@/lib/niveles';
 
 type Estudiante = {
   id: string;
@@ -26,17 +22,18 @@ type Estudiante = {
 type Credencial = { correo: string; password: string };
 type Mensaje = { tipo: 'error' | 'success'; texto: string };
 
+const TAM_MEDIO = 'modal-card-medio modal-card-holgado';
+
 const NUEVO_VACIO = {
   nombre_estudiante: '', codigo_estudiante: '', telefono_estudiante: '',
   correo_estudiante: '', nivel_consultorio: NIVELES[0] as string, password: '',
 };
 
-const minusculas = (s: string | null | undefined) => (s ?? '').trim().toLowerCase();
 const fechaCorta = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString('es-CO') : '—');
 
 export default function MonitoresPage() {
-  const router = useRouter();
-  const [autorizado, setAutorizado] = useState(false);
+  // Solo el administrador puede entrar aquí
+  const autorizado = !!usePermiso(['administrador']);
   const [monitores, setMonitores] = useState<Monitor[]>([]);
   const [cargando, setCargando] = useState(true);
   const [mensaje, setMensaje] = useState<Mensaje | null>(null);
@@ -62,22 +59,6 @@ export default function MonitoresPage() {
   const [erroresPorEst, setErroresPorEst] = useState<Record<string, string>>({});
   const [nuevo, setNuevo] = useState<typeof NUEVO_VACIO | null>(null);
 
-  // Solo el administrador puede entrar aquí
-  useEffect(() => {
-    let cancelado = false;
-    async function verificarPermiso() {
-      const { data: { session } } = await supabase.auth.getSession();
-      const user = session?.user;
-      if (!user) { if (!cancelado) router.replace('/login'); return; }
-      const { data: perfil } = await supabase.from('usuarios').select('rol').eq('id', user.id).single();
-      if (cancelado) return;
-      if (perfil?.rol !== 'administrador') { router.replace('/login'); return; }
-      setAutorizado(true);
-    }
-    verificarPermiso();
-    return () => { cancelado = true; };
-  }, [router]);
-
   // Lista de monitores
   useEffect(() => {
     if (!autorizado) return;
@@ -88,7 +69,7 @@ export default function MonitoresPage() {
         const lista = await listarMonitores();
         if (!cancelado) setMonitores(lista);
       } catch (e) {
-        if (!cancelado) setMensaje({ tipo: 'error', texto: (e as Error).message });
+        if (!cancelado) setMensaje({ tipo: 'error', texto: mensajeDe(e) });
       }
       if (!cancelado) setCargando(false);
     }
@@ -101,33 +82,25 @@ export default function MonitoresPage() {
   useEffect(() => {
     if (!asignando) return;
     let cancelado = false;
-    async function cargarEstudiantes() {
-      const TAM = 1000;
-      const todos: Estudiante[] = [];
-      for (let desde = 0; ; desde += TAM) {
-        const { data, error } = await supabase
-          .from('estudiantes')
-          .select('id, nombre_estudiante, codigo_estudiante, correo_estudiante, nivel_consultorio')
-          .order('nombre_estudiante')
-          .order('id')
-          .range(desde, desde + TAM - 1);
-        if (cancelado) return;
-        if (error) { setErrorModal(error.message); setEstudiantes([]); return; }
-        todos.push(...(data ?? []));
-        if ((data?.length ?? 0) < TAM) break;
-      }
-      setEstudiantes(todos);
-    }
-    cargarEstudiantes();
+    traerTodo<Estudiante>((d, h) =>
+      supabase
+        .from('estudiantes')
+        .select('id, nombre_estudiante, codigo_estudiante, correo_estudiante, nivel_consultorio')
+        .order('nombre_estudiante')
+        .order('id')
+        .range(d, h)
+    )
+      .then((todos) => { if (!cancelado) setEstudiantes(todos); })
+      .catch((e) => { if (!cancelado) { setErrorModal(mensajeDe(e)); setEstudiantes([]); } });
     return () => { cancelado = true; };
   }, [asignando, recargaEst]);
 
   // ── Lista principal ──
   const filtrados = useMemo(() => {
-    const q = minusculas(busqueda);
+    const q = normalizar(busqueda);
     if (!q) return monitores;
     return monitores.filter((m) =>
-      [m.nombre, m.correo, m.codigo].some((v) => minusculas(v).includes(q))
+      [m.nombre, m.correo, m.codigo].some((v) => normalizar(v).includes(q))
     );
   }, [monitores, busqueda]);
 
@@ -138,16 +111,16 @@ export default function MonitoresPage() {
   // ── Asignar ──
   // Quienes ya son monitores no se ofrecen de nuevo (por vínculo o por coincidir el correo)
   const idsMonitores = useMemo(() => new Set(monitores.map((m) => m.id_estudiante).filter(Boolean)), [monitores]);
-  const correosMonitores = useMemo(() => new Set(monitores.map((m) => minusculas(m.correo))), [monitores]);
+  const correosMonitores = useMemo(() => new Set(monitores.map((m) => normalizar(m.correo))), [monitores]);
   const disponibles = useMemo(
     () => (estudiantes ?? []).filter((e) =>
-      !idsMonitores.has(e.id) && !(e.correo_estudiante && correosMonitores.has(minusculas(e.correo_estudiante)))
+      !idsMonitores.has(e.id) && !(e.correo_estudiante && correosMonitores.has(normalizar(e.correo_estudiante)))
     ),
     [estudiantes, idsMonitores, correosMonitores]
   );
   const disponiblesFiltrados = useMemo(() => {
-    const q = minusculas(busquedaEst);
-    return q ? disponibles.filter((e) => minusculas(e.nombre_estudiante).includes(q) || minusculas(e.codigo_estudiante).includes(q)) : disponibles;
+    const q = normalizar(busquedaEst);
+    return q ? disponibles.filter((e) => normalizar(e.nombre_estudiante).includes(q) || normalizar(e.codigo_estudiante).includes(q)) : disponibles;
   }, [disponibles, busquedaEst]);
   const paginasEst = Math.max(1, Math.ceil(disponiblesFiltrados.length / POR_PAGINA));
   const paginaEstSegura = Math.min(paginaEst, paginasEst);
@@ -180,6 +153,8 @@ export default function MonitoresPage() {
       return copia;
     });
   }
+
+  const cambiarNuevo = (campo: keyof typeof NUEVO_VACIO, valor: string) => setNuevo((n) => (n ? { ...n, [campo]: valor } : n));
 
   function cambiarCredencial(id: string, campo: keyof Credencial, valor: string) {
     setSeleccion((prev) => ({ ...prev, [id]: { ...prev[id], [campo]: valor } }));
@@ -226,7 +201,7 @@ export default function MonitoresPage() {
         setMensaje({ tipo: 'success', texto: `${exitosos.length} asignado(s). Revisa los que tuvieron error.` });
       }
     } catch (e) {
-      setErrorModal((e as Error).message);
+      setErrorModal(mensajeDe(e));
     }
     setTrabajando(false);
   }
@@ -271,7 +246,7 @@ export default function MonitoresPage() {
         setMensaje({ tipo: 'success', texto: `${datos.nombre_estudiante} fue agregado y asignado como monitor.` });
       }
     } catch (e) {
-      setErrorModal((e as Error).message);
+      setErrorModal(mensajeDe(e));
     }
     setTrabajando(false);
   }
@@ -290,7 +265,7 @@ export default function MonitoresPage() {
       setRecarga((n) => n + 1);
       setMensaje({ tipo: 'success', texto: 'Credenciales actualizadas.' });
     } catch (e) {
-      setErrorModal((e as Error).message);
+      setErrorModal(mensajeDe(e));
     }
     setTrabajando(false);
   }
@@ -307,7 +282,7 @@ export default function MonitoresPage() {
       setRecarga((n) => n + 1);
       setMensaje({ tipo: 'success', texto: `Se quitó el rol de monitor a ${nombre}. Sus recepciones se conservan.` });
     } catch (e) {
-      setErrorModal((e as Error).message);
+      setErrorModal(mensajeDe(e));
     }
     setTrabajando(false);
   }
@@ -395,18 +370,11 @@ export default function MonitoresPage() {
 
       {/* Detalle del monitor: desde aquí se editan las credenciales o se quita el rol */}
       {detalle && (
-        <div className="modal-overlay" onClick={() => setDetalle(null)}>
-          <div className="modal-card modal-card-medio modal-card-holgado" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-card-cuerpo">
-              <div className="caso-encabezado"><h3>{detalle.nombre ?? detalle.correo}</h3></div>
-              <div className="caso-datos monitor-datos">
-                <div className="caso-dato"><span>Correo de ingreso</span><p>{detalle.correo}</p></div>
-                <div className="caso-dato"><span>Código</span><p>{detalle.codigo || '—'}</p></div>
-                <div className="caso-dato"><span>Nivel de consultorio</span><p>{nivelRomano(detalle.nivel) || '—'}</p></div>
-                <div className="caso-dato"><span>Monitor desde</span><p>{fechaCorta(detalle.creado_en)}</p></div>
-              </div>
-            </div>
-            <div className="modal-acciones modal-acciones-compactas">
+        <Modal
+          clase={TAM_MEDIO}
+          onFuera={() => setDetalle(null)}
+          acciones={
+            <>
               <button
                 className="btn-secundario btn-eliminar acciones-izquierda"
                 onClick={() => { setQuitando(detalle); setDetalle(null); }}
@@ -420,234 +388,203 @@ export default function MonitoresPage() {
               >
                 Editar credenciales
               </button>
-            </div>
+            </>
+          }
+        >
+          <div className="caso-encabezado"><h3>{detalle.nombre ?? detalle.correo}</h3></div>
+          <div className="caso-datos monitor-datos">
+            <div className="caso-dato"><span>Correo de ingreso</span><p>{detalle.correo}</p></div>
+            <div className="caso-dato"><span>Código</span><p>{detalle.codigo || '—'}</p></div>
+            <div className="caso-dato"><span>Nivel de consultorio</span><p>{nivelRomano(detalle.nivel) || '—'}</p></div>
+            <div className="caso-dato"><span>Monitor desde</span><p>{fechaCorta(detalle.creado_en)}</p></div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* Editar credenciales */}
       {editando && (
-        <div className="modal-overlay" onClick={() => !trabajando && setEditando(null)}>
-          <div className="modal-card modal-card-medio modal-card-holgado" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-card-cuerpo">
-              <h3>Editar credenciales</h3>
-              <p className="texto-secundario">{editando.monitor.nombre ?? editando.monitor.correo}</p>
-              {errorModal && <div className="form-message error">{errorModal}</div>}
-              <div className="field">
-                <label htmlFor="mon-correo">Correo de ingreso</label>
-                <input
-                  id="mon-correo"
-                  type="email"
-                  value={editando.correo}
-                  onChange={(e) => setEditando({ ...editando, correo: e.target.value })}
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="mon-pass">Nueva contraseña</label>
-                <div className="cred-con-boton">
-                  <input
-                    id="mon-pass"
-                    type="text"
-                    autoComplete="off"
-                    placeholder="Déjala vacía para no cambiarla"
-                    value={editando.password}
-                    onChange={(e) => setEditando({ ...editando, password: e.target.value })}
-                  />
-                  <button type="button" className="btn-secundario" onClick={() => setEditando({ ...editando, password: generarPassword() })}>
-                    Generar
-                  </button>
-                </div>
-              </div>
-            </div>
-            <div className="modal-acciones modal-acciones-compactas">
+        <Modal
+          clase={TAM_MEDIO}
+          onFuera={() => !trabajando && setEditando(null)}
+          acciones={
+            <>
               <button className="btn-secundario" onClick={() => setEditando(null)} disabled={trabajando}>Cancelar</button>
               <button className="btn-primary" onClick={guardarCredenciales} disabled={trabajando}>
                 {trabajando ? 'Guardando...' : 'Guardar'}
               </button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        >
+          <h3>Editar credenciales</h3>
+          <p className="texto-secundario">{editando.monitor.nombre ?? editando.monitor.correo}</p>
+          {errorModal && <div className="form-message error">{errorModal}</div>}
+          <Campo id="mon-correo" tipo="email" label="Correo de ingreso" valor={editando.correo} onCambio={(v) => setEditando({ ...editando, correo: v })} />
+          <CampoPassword
+            id="mon-pass"
+            label="Nueva contraseña"
+            placeholder="Déjala vacía para no cambiarla"
+            valor={editando.password}
+            onCambio={(v) => setEditando({ ...editando, password: v })}
+          />
+        </Modal>
       )}
 
       {/* Confirmar quitar rol */}
       {quitando && (
-        <div className="modal-overlay" onClick={() => !trabajando && setQuitando(null)}>
-          <div className="modal-card modal-card-medio modal-card-holgado" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-card-cuerpo">
-              <h3>Quitar rol de monitor</h3>
-              <p className="texto-secundario" style={{ margin: '0 0 12px' }}>
-                <strong>{quitando.nombre ?? quitando.correo}</strong> ya no podrá ingresar a la aplicación y dejará de aparecer en esta lista.
-              </p>
-              <p className="texto-secundario" style={{ margin: '0 0 12px' }}>
-                No se elimina nada: sus recepciones, asignaciones y archivos se conservan tal como están. Puedes volver a asignarle el rol cuando quieras.
-              </p>
-              {errorModal && <div className="form-message error">{errorModal}</div>}
-            </div>
-            <div className="modal-acciones modal-acciones-compactas">
+        <Modal
+          clase={TAM_MEDIO}
+          onFuera={() => !trabajando && setQuitando(null)}
+          acciones={
+            <>
               <button className="btn-secundario" onClick={() => setQuitando(null)} disabled={trabajando}>Cancelar</button>
               <button className="btn-peligro" onClick={confirmarQuitar} disabled={trabajando}>
                 {trabajando ? 'Quitando...' : 'Quitar rol'}
               </button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        >
+          <h3>Quitar rol de monitor</h3>
+          <p className="texto-secundario" style={{ margin: '0 0 12px' }}>
+            <strong>{quitando.nombre ?? quitando.correo}</strong> ya no podrá ingresar a la aplicación y dejará de aparecer en esta lista.
+          </p>
+          <p className="texto-secundario" style={{ margin: '0 0 12px' }}>
+            No se elimina nada: sus recepciones, asignaciones y archivos se conservan tal como están. Puedes volver a asignarle el rol cuando quieras.
+          </p>
+          {errorModal && <div className="form-message error">{errorModal}</div>}
+        </Modal>
       )}
 
       {/* Asignar monitores (varios a la vez) */}
       {asignando && (
-        <div className="modal-overlay" onClick={cerrarAsignar}>
-          <div className="modal-card modal-card-amplio modal-card-holgado" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-card-cuerpo">
-              <h3>Asignar monitores</h3>
-              <p className="texto-secundario">
-                Elige uno o varios estudiantes y define el correo y la contraseña con los que ingresarán.
-              </p>
-              {errorModal && <div className="form-message error">{errorModal}</div>}
+        <Modal
+          clase="modal-card-amplio modal-card-holgado"
+          onFuera={cerrarAsignar}
+          acciones={
+            nuevo ? (
+              <>
+                <button className="btn-secundario" onClick={() => { setNuevo(null); setErrorModal(null); }} disabled={trabajando}>Volver a la lista</button>
+                <button className="btn-primary" onClick={agregarYAsignar} disabled={trabajando}>
+                  {trabajando ? 'Guardando...' : 'Agregar y asignar'}
+                </button>
+              </>
+            ) : (
+              <>
+                <button className="btn-secundario" onClick={cerrarAsignar} disabled={trabajando}>Cancelar</button>
+                <button className="btn-primary" onClick={asignarSeleccionados} disabled={trabajando || idsSeleccionados.length === 0}>
+                  {trabajando
+                    ? 'Asignando...'
+                    : idsSeleccionados.length > 1 ? `Asignar ${idsSeleccionados.length} monitores` : 'Asignar monitor'}
+                </button>
+              </>
+            )
+          }
+        >
+          <h3>Asignar monitores</h3>
+          <p className="texto-secundario">
+            Elige uno o varios estudiantes y define el correo y la contraseña con los que ingresarán.
+          </p>
+          {errorModal && <div className="form-message error">{errorModal}</div>}
 
-              {nuevo ? (
-                /* ── Nuevo estudiante ── */
-                <>
-                  <h4 className="caso-seccion-titulo">Nuevo estudiante</h4>
-                  <div className="field">
-                    <label>Nombre</label>
-                    <input type="text" value={nuevo.nombre_estudiante} onChange={(e) => setNuevo({ ...nuevo, nombre_estudiante: e.target.value })} />
-                  </div>
-                  <div className="field">
-                    <label>Código</label>
-                    <input type="text" value={nuevo.codigo_estudiante} onChange={(e) => setNuevo({ ...nuevo, codigo_estudiante: e.target.value })} />
-                  </div>
-                  <div className="field">
-                    <label>Teléfono (opcional)</label>
-                    <input type="text" value={nuevo.telefono_estudiante} onChange={(e) => setNuevo({ ...nuevo, telefono_estudiante: e.target.value })} />
-                  </div>
-                  <div className="field">
-                    <label>Nivel de consultorio</label>
-                    <select
-                      className="campo-select"
-                      value={nuevo.nivel_consultorio}
-                      onChange={(e) => setNuevo({ ...nuevo, nivel_consultorio: e.target.value })}
-                    >
-                      {NIVELES.map((n) => <option key={n} value={n}>{etiquetaNivel(n)}</option>)}
-                    </select>
-                  </div>
-                  <div className="field">
-                    <label>Correo (será su usuario de ingreso)</label>
-                    <input type="email" value={nuevo.correo_estudiante} onChange={(e) => setNuevo({ ...nuevo, correo_estudiante: e.target.value })} />
-                  </div>
-                  <div className="field">
-                    <label>Contraseña</label>
-                    <div className="cred-con-boton">
-                      <input type="text" autoComplete="off" value={nuevo.password} onChange={(e) => setNuevo({ ...nuevo, password: e.target.value })} />
-                      <button type="button" className="btn-secundario" onClick={() => setNuevo({ ...nuevo, password: generarPassword() })}>Generar</button>
-                    </div>
-                  </div>
-                </>
-              ) : (
-                /* ── Elegir de la lista ── */
-                <>
-                  <div className="field">
-                    <label>Estudiantes</label>
-                    <input
-                      type="text"
-                      className="busqueda-estudiantes"
-                      placeholder="Buscar por nombre o código..."
-                      value={busquedaEst}
-                      onChange={(e) => { setBusquedaEst(e.target.value); setPaginaEst(1); }}
-                    />
-                    {estudiantes === null ? (
-                      <p className="admin-estado-cargando" style={{ margin: 0 }}>Cargando estudiantes...</p>
-                    ) : disponiblesFiltrados.length === 0 ? (
-                      <p className="admin-estado-vacio" style={{ margin: 0 }}>
-                        {busquedaEst ? 'Ningún estudiante coincide con la búsqueda.' : 'Todos los estudiantes ya son monitores.'}
-                      </p>
-                    ) : (
-                      <>
-                        <div className="lista-estudiantes">
-                          {estudiantesPagina.map((e) => {
-                            const marcado = !!seleccion[e.id];
-                            return (
-                              <div
-                                key={e.id}
-                                className={`estudiante-fila estudiante-fila-simple${marcado ? ' seleccionada' : ''}`}
-                                onClick={() => alternar(e)}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={marcado}
-                                  onChange={() => alternar(e)}
-                                  onClick={(ev) => ev.stopPropagation()}
-                                />
-                                <span className="estudiante-nombre" title={e.nombre_estudiante}>{e.nombre_estudiante}</span>
-                                <span className="estudiante-codigo">({e.codigo_estudiante})</span>
-                                <span className="estudiante-badge vacio">{nivelRomano(e.nivel_consultorio)}</span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                        <Paginacion pagina={paginaEstSegura} total={disponiblesFiltrados.length} onCambiar={setPaginaEst} compacto />
-                      </>
-                    )}
-                    <button type="button" className="btn-secundario cred-nuevo-btn" onClick={() => { setErrorModal(null); setNuevo({ ...NUEVO_VACIO }); }}>
-                      + ¿No está en la lista? Agregar nuevo estudiante
-                    </button>
-                  </div>
-
-                  {seleccionados.length > 0 && (
-                    <>
-                      <h4 className="caso-seccion-titulo">Credenciales de ingreso ({seleccionados.length})</h4>
-                      <div className="cred-lista">
-                        {seleccionados.map((e) => (
-                          <div key={e.id} className="cred-fila">
-                            <div className="cred-fila-nombre">{e.nombre_estudiante}</div>
+          {nuevo ? (
+            /* ── Nuevo estudiante ── */
+            <>
+              <h4 className="caso-seccion-titulo">Nuevo estudiante</h4>
+              <Campo label="Nombre" valor={nuevo.nombre_estudiante} onCambio={(v) => cambiarNuevo('nombre_estudiante', v)} />
+              <Campo label="Código" valor={nuevo.codigo_estudiante} onCambio={(v) => cambiarNuevo('codigo_estudiante', v)} />
+              <Campo label="Teléfono (opcional)" valor={nuevo.telefono_estudiante} onCambio={(v) => cambiarNuevo('telefono_estudiante', v)} />
+              <CampoNivel valor={nuevo.nivel_consultorio} onCambio={(v) => cambiarNuevo('nivel_consultorio', v)} />
+              <Campo
+                label="Correo (será su usuario de ingreso)"
+                tipo="email"
+                valor={nuevo.correo_estudiante}
+                onCambio={(v) => cambiarNuevo('correo_estudiante', v)}
+              />
+              <CampoPassword label="Contraseña" valor={nuevo.password} onCambio={(v) => cambiarNuevo('password', v)} />
+            </>
+          ) : (
+            /* ── Elegir de la lista ── */
+            <>
+              <div className="field">
+                <label>Estudiantes</label>
+                <input
+                  type="text"
+                  className="busqueda-estudiantes"
+                  placeholder="Buscar por nombre o código..."
+                  value={busquedaEst}
+                  onChange={(e) => { setBusquedaEst(e.target.value); setPaginaEst(1); }}
+                />
+                {estudiantes === null ? (
+                  <p className="admin-estado-cargando" style={{ margin: 0 }}>Cargando estudiantes...</p>
+                ) : disponiblesFiltrados.length === 0 ? (
+                  <p className="admin-estado-vacio" style={{ margin: 0 }}>
+                    {busquedaEst ? 'Ningún estudiante coincide con la búsqueda.' : 'Todos los estudiantes ya son monitores.'}
+                  </p>
+                ) : (
+                  <>
+                    <div className="lista-estudiantes">
+                      {estudiantesPagina.map((e) => {
+                        const marcado = !!seleccion[e.id];
+                        return (
+                          <div
+                            key={e.id}
+                            className={`estudiante-fila estudiante-fila-simple${marcado ? ' seleccionada' : ''}`}
+                            onClick={() => alternar(e)}
+                          >
                             <input
-                              type="email"
-                              placeholder="Correo de ingreso"
-                              value={seleccion[e.id].correo}
-                              onChange={(ev) => cambiarCredencial(e.id, 'correo', ev.target.value)}
+                              type="checkbox"
+                              checked={marcado}
+                              onChange={() => alternar(e)}
+                              onClick={(ev) => ev.stopPropagation()}
                             />
-                            <div className="cred-con-boton">
-                              <input
-                                type="text"
-                                autoComplete="off"
-                                placeholder="Contraseña"
-                                value={seleccion[e.id].password}
-                                onChange={(ev) => cambiarCredencial(e.id, 'password', ev.target.value)}
-                              />
-                              <button type="button" className="btn-secundario" onClick={() => cambiarCredencial(e.id, 'password', generarPassword())}>
-                                Generar
-                              </button>
-                            </div>
-                            {erroresPorEst[e.id] && <div className="cred-error">{erroresPorEst[e.id]}</div>}
+                            <span className="estudiante-nombre" title={e.nombre_estudiante}>{e.nombre_estudiante}</span>
+                            <span className="estudiante-codigo">({e.codigo_estudiante})</span>
+                            <span className="estudiante-badge vacio">{nivelRomano(e.nivel_consultorio)}</span>
                           </div>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </>
-              )}
-            </div>
+                        );
+                      })}
+                    </div>
+                    <Paginacion pagina={paginaEstSegura} total={disponiblesFiltrados.length} onCambiar={setPaginaEst} compacto />
+                  </>
+                )}
+                <button type="button" className="btn-secundario cred-nuevo-btn" onClick={() => { setErrorModal(null); setNuevo({ ...NUEVO_VACIO }); }}>
+                  + ¿No está en la lista? Agregar nuevo estudiante
+                </button>
+              </div>
 
-            <div className="modal-acciones modal-acciones-compactas">
-              {nuevo ? (
+              {seleccionados.length > 0 && (
                 <>
-                  <button className="btn-secundario" onClick={() => { setNuevo(null); setErrorModal(null); }} disabled={trabajando}>Volver a la lista</button>
-                  <button className="btn-primary" onClick={agregarYAsignar} disabled={trabajando}>
-                    {trabajando ? 'Guardando...' : 'Agregar y asignar'}
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button className="btn-secundario" onClick={cerrarAsignar} disabled={trabajando}>Cancelar</button>
-                  <button className="btn-primary" onClick={asignarSeleccionados} disabled={trabajando || idsSeleccionados.length === 0}>
-                    {trabajando
-                      ? 'Asignando...'
-                      : idsSeleccionados.length > 1 ? `Asignar ${idsSeleccionados.length} monitores` : 'Asignar monitor'}
-                  </button>
+                  <h4 className="caso-seccion-titulo">Credenciales de ingreso ({seleccionados.length})</h4>
+                  <div className="cred-lista">
+                    {seleccionados.map((e) => (
+                      <div key={e.id} className="cred-fila">
+                        <div className="cred-fila-nombre">{e.nombre_estudiante}</div>
+                        <input
+                          type="email"
+                          placeholder="Correo de ingreso"
+                          value={seleccion[e.id].correo}
+                          onChange={(ev) => cambiarCredencial(e.id, 'correo', ev.target.value)}
+                        />
+                        <div className="cred-con-boton">
+                          <input
+                            type="text"
+                            autoComplete="off"
+                            placeholder="Contraseña"
+                            value={seleccion[e.id].password}
+                            onChange={(ev) => cambiarCredencial(e.id, 'password', ev.target.value)}
+                          />
+                          <button type="button" className="btn-secundario" onClick={() => cambiarCredencial(e.id, 'password', generarPassword())}>
+                            Generar
+                          </button>
+                        </div>
+                        {erroresPorEst[e.id] && <div className="cred-error">{erroresPorEst[e.id]}</div>}
+                      </div>
+                    ))}
+                  </div>
                 </>
               )}
-            </div>
-          </div>
-        </div>
+            </>
+          )}
+        </Modal>
       )}
     </>
   );

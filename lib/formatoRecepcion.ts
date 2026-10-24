@@ -1,6 +1,8 @@
 // Lógica compartida del formato de recepción: llenar el PDF a partir de los datos
 // (se usa al guardar en /recepcion y al volver a descargarlo desde el libro de asesorías).
 
+import { descargarBlob } from '@/lib/utilidades';
+
 export const PDF_URL = '/formato-recepcion.pdf'; // PDF editable en /public
 
 export type Valores = Record<string, string>;
@@ -21,6 +23,12 @@ export const TAM_FUENTE = 7.994;
 export const LINEAS_HECHO = 4;
 export const ANCHO_HECHO = 515;
 export const ANCHOS_HECHO = Array<number>(LINEAS_HECHO).fill(ANCHO_HECHO);
+export const HECHOS = [1, 2, 3, 4, 5];
+
+// Texto completo del hecho N. Los registros antiguos lo guardan partido en 3 líneas
+// (sintesis_hecho_N1, _N2, _N3): en ese caso se juntan.
+export const hechoCompleto = (v: Valores, n: number) =>
+  v[`sintesis_hecho_${n}`] || [1, 2, 3].map((i) => v[`sintesis_hecho_${n}${i}`]).filter(Boolean).join(' ');
 
 // Campos del PDF cuyo nombre en la plantilla no coincide con el que usa la app
 // (nombre en el PDF -> nombre que usa la app). Así la plantilla funciona sin tener que renombrarlos.
@@ -136,10 +144,8 @@ export async function generarPdfRecepcion(valores: Valores): Promise<Uint8Array>
 
   // Cada hecho va en su cuadro del formato (campo "sintesis_hecho_N1"), con saltos de línea ya calculados.
   // Los registros antiguos traían el hecho partido en 3 líneas (_N1, _N2, _N3): se juntan y se vuelven a acomodar.
-  for (let n = 1; n <= 5; n++) {
-    const completo =
-      datos[`sintesis_hecho_${n}`] ??
-      [1, 2, 3].map((i) => datos[`sintesis_hecho_${n}${i}`]).filter(Boolean).join(' ');
+  for (const n of HECHOS) {
+    const completo = hechoCompleto(datos, n);
     if (!completo) continue;
     datos[`sintesis_hecho_${n}1`] = partirEnLineas(completo, medir).lineas.join('\n');
   }
@@ -180,10 +186,5 @@ export async function generarPdfRecepcion(valores: Valores): Promise<Uint8Array>
 }
 
 export function descargarArchivo(bytes: Uint8Array, nombre: string) {
-  const blob = new Blob([bytes as BlobPart], { type: 'application/pdf' });
-  const enlace = document.createElement('a');
-  enlace.href = URL.createObjectURL(blob);
-  enlace.download = nombre;
-  enlace.click();
-  setTimeout(() => URL.revokeObjectURL(enlace.href), 10000);
+  descargarBlob(bytes as BlobPart, nombre, 'application/pdf');
 }

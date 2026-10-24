@@ -1,13 +1,19 @@
 // Estructura del formulario de recepción por secciones: qué campos tiene cada una,
 // cuáles quedaron en blanco y cómo se rellenan si la persona decide descargar igual.
 
-import { CAMPOS_INDIVIDUALES, aMayusculas, norm, valoresDesdeFila, type Valores } from '@/lib/formatoRecepcion';
+import {
+  CAMPOS_INDIVIDUALES, HECHOS, aMayusculas, crearMedidor, hechoCompleto, norm, partirEnLineas, valoresDesdeFila,
+  type Medidor, type Valores,
+} from '@/lib/formatoRecepcion';
+import { NIVELES } from '@/lib/niveles';
+
+export { HECHOS };
 
 // Lo que se escribe cuando algo queda sin llenar y se descarga de todas formas.
 export const SIN_TEXTO = 'N/A'; // espacios de texto vacíos
 export const SIN_SELECCION = '-'; // casillas de un grupo en el que no se eligió nada (cabe en el cuadrito del PDF)
 
-export const AREAS_DERECHO = ['DERECHO PUBLICO', 'DERECHO PRIVADO', 'DERECHO LABORAL', 'DERECHO PENAL'];
+export const AREAS_DERECHO: string[] = [...NIVELES]; // las áreas son los mismos niveles del consultorio
 
 export type Opcion = { k: string; label: string };
 
@@ -81,7 +87,6 @@ export const ASESORIA_REPARTO: Opcion[] = [
   { k: 'asesoria_sin_reparto', label: 'Sin reparto' },
 ];
 
-export const HECHOS = [1, 2, 3, 4, 5];
 export const DOCUMENTOS = [1, 2, 3, 4, 5];
 
 type Item =
@@ -297,11 +302,6 @@ export function resumenCaso(fila: Record<string, unknown>): SeccionCaso[] {
   };
   const siNo = (kSi: string, kNo: string) => (v[kSi] === 'X' ? 'Sí' : v[kNo] === 'X' ? 'No' : '—');
 
-  // Los registros antiguos guardan cada hecho partido en 3 líneas (sintesis_hecho_11, _12, _13)
-  const hecho = (n: number) =>
-    v[`sintesis_hecho_${n}`] ??
-    [1, 2, 3].map((i) => v[`sintesis_hecho_${n}${i}`]).filter(Boolean).join(' ');
-
   return SECCIONES.map((sec) => {
     const datos: DatoCaso[] = [];
     for (const it of sec.items) {
@@ -310,7 +310,7 @@ export function resumenCaso(fila: Record<string, unknown>): SeccionCaso[] {
           datos.push({ label: 'N.º de asesoría', valor: dato(v.asesoria_no) });
         }
         const largo = it.k.startsWith('sintesis_hecho_');
-        const valor = largo ? hecho(Number(it.k.split('_')[2])) : v[it.k];
+        const valor = largo ? hechoCompleto(v, Number(it.k.split('_')[2])) : v[it.k];
         datos.push({ label: it.label, valor: dato(valor), largo });
       } else if (it.tipo === 'opciones') {
         datos.push({ label: it.label, valor: marcadas(it.opciones), largo: it.opciones.length > 6 });
@@ -348,8 +348,8 @@ export function valoresParaEditar(fila: Record<string, unknown>): Valores {
   for (const k of casillas) if (v[k] === SIN_SELECCION) delete v[k];
 
   for (const n of HECHOS) {
-    const lineas = [1, 2, 3].map((i) => v[`sintesis_hecho_${n}${i}`]).filter(Boolean);
-    if (!v[`sintesis_hecho_${n}`] && lineas.length) v[`sintesis_hecho_${n}`] = lineas.join(' ');
+    const completo = hechoCompleto(v, n);
+    if (completo) v[`sintesis_hecho_${n}`] = completo;
     [1, 2, 3].forEach((i) => delete v[`sintesis_hecho_${n}${i}`]);
   }
   return v;
@@ -370,4 +370,10 @@ export function prepararEdicion(v: Valores): { columnas: Record<string, string |
     else detalles[k] = final;
   }
   return { columnas, detalles };
+}
+
+// Primer hecho que no cabe en su cuadro del PDF (se mide en MAYÚSCULAS, igual que se imprime). null = todos caben.
+export async function hechoQueNoCabe(v: Valores, medidor?: Medidor | null): Promise<number | null> {
+  const medir = medidor ?? (await crearMedidor());
+  return HECHOS.find((n) => partirEnLineas((v[`sintesis_hecho_${n}`] ?? '').toUpperCase(), medir).desborde) ?? null;
 }

@@ -1,16 +1,19 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase'; // ajusta la ruta si tu cliente está en otro lugar
+import { supabase } from '@/lib/supabase';
+import { usePermiso } from '@/lib/sesion';
+import { mensajeDe } from '@/lib/utilidades';
 import PanelTopbar from '@/components/PanelTopbar';
+import Modal from '@/components/Modal';
 import { FormProvider } from '@/components/recepcion/Controles';
 import CamposSeccion from '@/components/recepcion/CamposFormulario';
 import {
-  CAMPOS_INDIVIDUALES, Medidor, Valores, aMayusculas, crearMedidor, descargarArchivo,
-  generarPdfRecepcion, partirEnLineas,
+  CAMPOS_INDIVIDUALES, Medidor, Valores, aMayusculas, crearMedidor, descargarArchivo, generarPdfRecepcion,
 } from '@/lib/formatoRecepcion';
-import { DISCAPACIDADES, HECHOS, SECCIONES, SIN_SELECCION, SIN_TEXTO, completarEnBlanco, revisarFormulario } from '@/lib/estructuraRecepcion';
+import {
+  DISCAPACIDADES, SECCIONES, SIN_SELECCION, SIN_TEXTO, completarEnBlanco, hechoQueNoCabe, revisarFormulario,
+} from '@/lib/estructuraRecepcion';
 
 const ULTIMO_PASO = SECCIONES.length - 1;
 
@@ -24,7 +27,8 @@ function valoresIniciales(): Valores {
 }
 
 export default function RecepcionPage() {
-  const router = useRouter();
+  // Solo monitores o administradores pueden entrar aquí
+  const sesion = usePermiso(['monitor', 'administrador']);
   const [valores, setValores] = useState<Valores>({});
   const [medidor, setMedidor] = useState<Medidor | null>(null);
   const [paso, setPaso] = useState(0);
@@ -50,21 +54,6 @@ export default function RecepcionPage() {
   const progreso = totalEspacios > 0
     ? Math.min(100, Math.max(0, Math.round(((totalEspacios - totalFaltantes) / totalEspacios) * 100)))
     : 0;
-
-  // Solo monitores o administradores pueden entrar aquí
-  useEffect(() => {
-    let cancelado = false;
-    async function verificarPermiso() {
-      const { data: { session } } = await supabase.auth.getSession();
-      const user = session?.user;
-      if (!user) { if (!cancelado) router.replace('/login'); return; }
-      const { data: perfil } = await supabase.from('usuarios').select('rol').eq('id', user.id).single();
-      if (cancelado) return;
-      if (!perfil || !['monitor', 'administrador'].includes(perfil.rol)) router.replace('/login');
-    }
-    verificarPermiso();
-    return () => { cancelado = true; };
-  }, [router]);
 
   // Fecha y hora actuales por defecto + medidor de texto (misma fuente del PDF)
   useEffect(() => {
@@ -136,13 +125,10 @@ export default function RecepcionPage() {
       // El N.º de asesoría es opcional: se puede escribir ahora o después (desde Asignación)
       const numero = (base.asesoria_no ?? '').trim();
 
-      // Los hechos se miden en MAYÚSCULAS, igual que se imprimen en el PDF
-      const medir = medidor ?? (await crearMedidor());
-      for (const n of HECHOS) {
-        if (partirEnLineas((base[`sintesis_hecho_${n}`] ?? '').toUpperCase(), medir).desborde) {
-          irAPaso(ULTIMO_PASO);
-          throw new Error(`El hecho ${n} no cabe en el espacio del formato. Acórtalo para poder guardar.`);
-        }
+      const noCabe = await hechoQueNoCabe(base, medidor);
+      if (noCabe) {
+        irAPaso(ULTIMO_PASO);
+        throw new Error(`El hecho ${noCabe} no cabe en el espacio del formato. Acórtalo para poder guardar.`);
       }
 
       // 1. Si escribió un número, que no se repita
@@ -167,10 +153,11 @@ export default function RecepcionPage() {
       // 2. Llenar el formato PDF con los datos
       const bytes = await generarPdfRecepcion(finales);
       const nombreArchivo = `recepcion-${numero ? numero.replace(/[^A-Za-z0-9_-]/g, '_') : 'sin-numero'}-${Date.now()}.pdf`;
-      const blob = new Blob([bytes as BlobPart], { type: 'application/pdf' });
 
       // 3. Subir el PDF a Supabase Storage (bucket "recepciones")
-      const { error: errorSubida } = await supabase.storage.from('recepciones').upload(nombreArchivo, blob);
+      const { error: errorSubida } = await supabase.storage
+        .from('recepciones')
+        .upload(nombreArchivo, new Blob([bytes as BlobPart], { type: 'application/pdf' }));
       if (errorSubida) throw errorSubida;
       archivoSubido = nombreArchivo;
 
@@ -180,14 +167,17 @@ export default function RecepcionPage() {
       for (const [k, v] of Object.entries(finales)) {
         (CAMPOS_INDIVIDUALES.includes(k) ? individuales : detalles)[k] = v;
       }
-      const { data: { user } } = await supabase.auth.getUser();
       const { error: errorInsert } = await supabase.from('recepciones').insert({
         ...individuales,
         detalles,
         pdf_url: nombreArchivo, // el bucket es privado: se guarda solo la ruta del archivo
-        monitor_id: user?.id,
+        monitor_id: sesion?.userId,
       });
-      if (errorInsert) throw errorInsert;
+      if (errorInsert) {
+        // Otro monitor guardó el mismo número un instante antes (lo impide el índice único de la base)
+        if (errorInsert.code === '23505') throw new Error(`Ya existe una asesoría con el N.º ${numero}. Revisa el número.`);
+        throw errorInsert;
+      }
       archivoSubido = null; // todo salió bien: el PDF se queda en Storage
 
       // 5. Todo guardado: descargar el PDF
@@ -197,12 +187,7 @@ export default function RecepcionPage() {
     } catch (err) {
       // Si el PDF alcanzó a subirse pero no se pudo guardar el registro, se borra para no dejarlo huérfano
       if (archivoSubido) await supabase.storage.from('recepciones').remove([archivoSubido]);
-      const texto = err instanceof Error
-        ? err.message
-        : typeof err === 'object' && err && 'message' in err
-          ? String((err as { message: unknown }).message)
-          : 'Ocurrió un error al guardar.';
-      setMensaje({ tipo: 'error', titulo: 'No se pudo guardar', texto });
+      setMensaje({ tipo: 'error', titulo: 'No se pudo guardar', texto: mensajeDe(err, 'Ocurrió un error al guardar.') });
     } finally {
       setGuardando(false);
       setAviso(false);
@@ -282,55 +267,56 @@ export default function RecepcionPage() {
 
           {/* ───────── Mensaje (datos obligatorios o error al guardar) ───────── */}
           {mensaje && (
-            <div className="modal-overlay" onClick={() => setMensaje(null)}>
-              <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-                <div className="modal-card-cuerpo">
-                  <h3>{mensaje.titulo}</h3>
-                  <p className="rf-aviso-texto">{mensaje.texto}</p>
-                </div>
-                <div className="modal-acciones">
-                  <button type="button" className="btn-primary" autoFocus onClick={() => setMensaje(null)}>
-                    Entendido
-                  </button>
-                </div>
-              </div>
-            </div>
+            <Modal
+              onFuera={() => setMensaje(null)}
+              compactas={false}
+              acciones={
+                <button type="button" className="btn-primary" autoFocus onClick={() => setMensaje(null)}>
+                  Entendido
+                </button>
+              }
+            >
+              <h3>{mensaje.titulo}</h3>
+              <p className="rf-aviso-texto">{mensaje.texto}</p>
+            </Modal>
           )}
 
           {/* ───────── Advertencia: espacios en blanco ───────── */}
           {aviso && (
-            <div className="modal-overlay" onClick={() => !guardando && setAviso(false)}>
-              <div className="modal-card modal-card-ancho" onClick={(e) => e.stopPropagation()}>
-                <div className="modal-card-cuerpo">
-                  <h3>Hay {totalFaltantes} espacios sin llenar</h3>
-                  <p className="rf-aviso-texto">
-                    Si descargas de todas formas, los espacios de texto quedarán con <strong>{SIN_TEXTO}</strong> y
-                    las opciones que no se eligieron quedarán marcadas con <strong>{SIN_SELECCION}</strong>.
-                  </p>
-                  {faltantes.map((lista: string[], i: number) => lista.length > 0 && (
-                    <div key={SECCIONES[i].titulo} className="rf-aviso-seccion">
-                      <div className="rf-aviso-cabecera">
-                        <strong>{i + 1}. {SECCIONES[i].titulo}</strong>
-                        <button type="button" className="rf-aviso-ir" onClick={() => { setAviso(false); irAPaso(i); }}>
-                          Ir a esta sección
-                        </button>
-                      </div>
-                      <ul>
-                        {lista.map((etiqueta: string) => <li key={etiqueta}>{etiqueta}</li>)}
-                      </ul>
-                    </div>
-                  ))}
-                </div>
-                <div className="modal-acciones">
+            <Modal
+              clase="modal-card-ancho"
+              onFuera={() => !guardando && setAviso(false)}
+              compactas={false}
+              acciones={
+                <>
                   <button type="button" className="btn-secundario" disabled={guardando} onClick={() => setAviso(false)}>
                     Volver a completar
                   </button>
                   <button type="button" className="btn-primary" disabled={guardando} onClick={descargarDeTodasFormas}>
                     {guardando ? 'Guardando...' : 'Descargar de todas formas'}
                   </button>
+                </>
+              }
+            >
+              <h3>Hay {totalFaltantes} espacios sin llenar</h3>
+              <p className="rf-aviso-texto">
+                Si descargas de todas formas, los espacios de texto quedarán con <strong>{SIN_TEXTO}</strong> y
+                las opciones que no se eligieron quedarán marcadas con <strong>{SIN_SELECCION}</strong>.
+              </p>
+              {faltantes.map((lista: string[], i: number) => lista.length > 0 && (
+                <div key={SECCIONES[i].titulo} className="rf-aviso-seccion">
+                  <div className="rf-aviso-cabecera">
+                    <strong>{i + 1}. {SECCIONES[i].titulo}</strong>
+                    <button type="button" className="rf-aviso-ir" onClick={() => { setAviso(false); irAPaso(i); }}>
+                      Ir a esta sección
+                    </button>
+                  </div>
+                  <ul>
+                    {lista.map((etiqueta: string) => <li key={etiqueta}>{etiqueta}</li>)}
+                  </ul>
                 </div>
-              </div>
-            </div>
+              ))}
+            </Modal>
           )}
         </FormProvider>
       </div>

@@ -33,6 +33,16 @@ export default function LoginPage() {
     };
   }, []);
 
+  // Si la app cerró la sesión porque el administrador retiró el rol, se avisa aquí
+  useEffect(() => {
+    if (sessionStorage.getItem('acceso-retirado') !== '1') return;
+    const raf = requestAnimationFrame(() => {
+      sessionStorage.removeItem('acceso-retirado');
+      setMessage({ type: 'error', text: 'Tu cuenta ya no tiene acceso. Comunícate con el administrador.' });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
@@ -166,11 +176,6 @@ export default function LoginPage() {
             {message && <div className={`form-message ${message.type}`}>{message.text}</div>}
 
             <div className="auth-actions">
-              {/* TODO: conectar la recuperación de contraseña cuando se defina el flujo */}
-              <button type="button" className="auth-forgot">
-                ¿Olvidaste tu contraseña?
-              </button>
-
               <button className="btn-primary" type="submit" disabled={loading || isExiting}>
                 {loading ? 'Verificando...' : 'Iniciar sesión'}
               </button>

@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { TIPO_EXCEL, descargarBlob, difNumerica, hoyLocal, mensajeDe, traerTodo, uno } from '@/lib/utilidades';
+import Modal from '@/components/Modal';
 
 // Modal "Generar reparto": pide una fecha o un lapso y descarga un Excel con las asesorías
 // asignadas en ese periodo (solo asignaciones activas). Si el lapso dura más de un mes,
@@ -11,24 +13,16 @@ const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', '
 
 type FilaReparto = { asesoria: string; usuario: string; area: string; fecha: string; asunto: string; estudiante: string; reasignacion: boolean };
 
+type Recepcion = { asesoria_no: string | null; nombres_apellidos: string | null; area_derecho: string | null; naturaleza_asunto: string | null };
 type FilaBD = {
   fecha_asignacion: string;
   asesoria_no: string | null;
   es_reasignacion: boolean | null;
   estudiantes: { nombre_estudiante: string } | { nombre_estudiante: string }[] | null;
-  recepciones:
-    | { asesoria_no: string | null; nombres_apellidos: string | null; area_derecho: string | null; naturaleza_asunto: string | null }
-    | { asesoria_no: string | null; nombres_apellidos: string | null; area_derecho: string | null; naturaleza_asunto: string | null }[]
-    | null;
+  recepciones: Recepcion | Recepcion[] | null;
 };
 
 const pad = (n: number) => String(n).padStart(2, '0');
-
-// Fecha de hoy en la zona horaria del navegador (no en UTC)
-function hoyLocal(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
 
 const partes = (iso: string) => iso.split('-').map(Number) as [number, number, number];
 const verFecha = (iso: string) => { const [a, m, d] = partes(iso); return `${pad(d)}/${pad(m)}/${a}`; };
@@ -53,10 +47,8 @@ function mesesEntre(desde: string, hasta: string): { y: number; m: number }[] {
 }
 
 async function traerReparto(desde: string, hasta: string): Promise<FilaReparto[]> {
-  const TAM = 1000;
-  const filas: FilaReparto[] = [];
-  for (let ini = 0; ; ini += TAM) {
-    const { data, error } = await supabase
+  const datos = await traerTodo<FilaBD>((d, h) =>
+    supabase
       .from('asignaciones')
       .select(
         'fecha_asignacion, asesoria_no, es_reasignacion, estudiantes ( nombre_estudiante ), recepciones ( asesoria_no, nombres_apellidos, area_derecho, naturaleza_asunto )'
@@ -66,30 +58,28 @@ async function traerReparto(desde: string, hasta: string): Promise<FilaReparto[]
       .lte('fecha_asignacion', hasta)
       .order('fecha_asignacion')
       .order('id')
-      .range(ini, ini + TAM - 1);
-    if (error) throw new Error(error.message);
-    (data as unknown as FilaBD[] | null ?? []).forEach((r) => {
-      const rec = Array.isArray(r.recepciones) ? r.recepciones[0] : r.recepciones;
-      const est = Array.isArray(r.estudiantes) ? r.estudiantes[0] : r.estudiantes;
-      filas.push({
-        asesoria: rec?.asesoria_no ?? r.asesoria_no ?? '',
-        usuario: rec?.nombres_apellidos ?? '',
-        area: rec?.area_derecho ?? '',
-        fecha: r.fecha_asignacion,
-        asunto: rec?.naturaleza_asunto ?? '',
-        estudiante: est?.nombre_estudiante ?? '',
-        reasignacion: r.es_reasignacion === true,
-      });
-    });
-    if ((data?.length ?? 0) < TAM) break;
-  }
-  // Por fecha y, dentro de cada fecha, por número de asesoría
-  return filas.sort((a, b) => {
-    if (a.fecha !== b.fecha) return a.fecha.localeCompare(b.fecha);
-    const na = Number(a.asesoria), nb = Number(b.asesoria);
-    if (!Number.isNaN(na) && !Number.isNaN(nb) && na !== nb) return na - nb;
-    return a.asesoria.localeCompare(b.asesoria) || a.estudiante.localeCompare(b.estudiante);
+      .range(d, h)
+      .overrideTypes<FilaBD[], { merge: false }>()
+  );
+  const filas = datos.map((r) => {
+    const rec = uno(r.recepciones);
+    return {
+      asesoria: rec?.asesoria_no ?? r.asesoria_no ?? '',
+      usuario: rec?.nombres_apellidos ?? '',
+      area: rec?.area_derecho ?? '',
+      fecha: r.fecha_asignacion,
+      asunto: rec?.naturaleza_asunto ?? '',
+      estudiante: uno(r.estudiantes)?.nombre_estudiante ?? '',
+      reasignacion: r.es_reasignacion === true,
+    };
   });
+  // Por fecha y, dentro de cada fecha, por número de asesoría
+  return filas.sort((a, b) =>
+    a.fecha.localeCompare(b.fecha) ||
+    difNumerica(a.asesoria, b.asesoria) ||
+    a.asesoria.localeCompare(b.asesoria) ||
+    a.estudiante.localeCompare(b.estudiante)
+  );
 }
 
 async function crearExcel(filas: FilaReparto[], desde: string, hasta: string, dividirPorMes: boolean) {
@@ -181,16 +171,7 @@ async function crearExcel(filas: FilaReparto[], desde: string, hasta: string, di
       ? `Notificación de reparto (${nombreArchivoFecha(desde)}).xlsx`
       : `Notificación de reparto (${nombreArchivoFecha(desde)} a ${nombreArchivoFecha(hasta)}).xlsx`;
 
-  const buffer = await libro.xlsx.writeBuffer();
-  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-  const url = URL.createObjectURL(blob);
-  const enlace = document.createElement('a');
-  enlace.href = url;
-  enlace.download = nombre;
-  document.body.appendChild(enlace);
-  enlace.click();
-  enlace.remove();
-  URL.revokeObjectURL(url);
+  descargarBlob(await libro.xlsx.writeBuffer(), nombre, TIPO_EXCEL);
 }
 
 export default function ModalReparto({ onCerrar }: { onCerrar: () => void }) {
@@ -220,48 +201,47 @@ export default function ModalReparto({ onCerrar }: { onCerrar: () => void }) {
       await crearExcel(filas, inicio, fin, dividir);
       onCerrar();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudo generar el Excel.');
+      setError(mensajeDe(e, 'No se pudo generar el Excel.'));
       setGenerando(false);
     }
   }
 
   return (
-    <div className="modal-overlay" onClick={() => !generando && onCerrar()}>
-      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-card-cuerpo">
-          <h3>Generar reparto</h3>
-
-          <div className="rep-modos">
-            <button type="button" className={`rep-modo${modo === 'fecha' ? ' activo' : ''}`} onClick={() => { setModo('fecha'); setError(null); }}>
-              Fecha específica
-            </button>
-            <button type="button" className={`rep-modo${modo === 'lapso' ? ' activo' : ''}`} onClick={() => { setModo('lapso'); setError(null); }}>
-              Lapso de tiempo
-            </button>
-          </div>
-
-          <div className={`rep-fechas${modo === 'fecha' ? ' una' : ''}`}>
-            <div className="field">
-              <label htmlFor="rep-desde">{modo === 'fecha' ? 'Fecha del reparto' : 'Desde'}</label>
-              <input id="rep-desde" type="date" value={desde} onChange={(e) => { setDesde(e.target.value); setError(null); }} />
-            </div>
-            {modo === 'lapso' && (
-              <div className="field">
-                <label htmlFor="rep-hasta">Hasta</label>
-                <input id="rep-hasta" type="date" value={hasta} onChange={(e) => { setHasta(e.target.value); setError(null); }} />
-              </div>
-            )}
-          </div>
-
-          {dividir && <p className="rep-nota">El lapso es mayor a un mes: el Excel tendrá una hoja por cada mes ({cantidadHojas} hojas).</p>}
-          {error && <div className="form-message error" style={{ margin: '14px 0 0' }}>{error}</div>}
-        </div>
-
-        <div className="modal-acciones modal-acciones-compactas">
+    <Modal
+      onFuera={() => !generando && onCerrar()}
+      acciones={
+        <>
           <button className="btn-secundario" onClick={onCerrar} disabled={generando}>Cancelar</button>
           <button className="btn-primary" onClick={generar} disabled={generando}>{generando ? 'Generando...' : 'Generar Excel'}</button>
-        </div>
+        </>
+      }
+    >
+      <h3>Generar reparto</h3>
+
+      <div className="rep-modos">
+        <button type="button" className={`rep-modo${modo === 'fecha' ? ' activo' : ''}`} onClick={() => { setModo('fecha'); setError(null); }}>
+          Fecha específica
+        </button>
+        <button type="button" className={`rep-modo${modo === 'lapso' ? ' activo' : ''}`} onClick={() => { setModo('lapso'); setError(null); }}>
+          Lapso de tiempo
+        </button>
       </div>
-    </div>
+
+      <div className={`rep-fechas${modo === 'fecha' ? ' una' : ''}`}>
+        <div className="field">
+          <label htmlFor="rep-desde">{modo === 'fecha' ? 'Fecha del reparto' : 'Desde'}</label>
+          <input id="rep-desde" type="date" value={desde} onChange={(e) => { setDesde(e.target.value); setError(null); }} />
+        </div>
+        {modo === 'lapso' && (
+          <div className="field">
+            <label htmlFor="rep-hasta">Hasta</label>
+            <input id="rep-hasta" type="date" value={hasta} onChange={(e) => { setHasta(e.target.value); setError(null); }} />
+          </div>
+        )}
+      </div>
+
+      {dividir && <p className="rep-nota">El lapso es mayor a un mes: el Excel tendrá una hoja por cada mes ({cantidadHojas} hojas).</p>}
+      {error && <div className="form-message error" style={{ margin: '14px 0 0' }}>{error}</div>}
+    </Modal>
   );
 }

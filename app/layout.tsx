@@ -1,29 +1,35 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
+// Fuentes servidas desde el propio proyecto (app/fonts): no dependen de Google y no bloquean el primer pintado.
+// Solo se incluyen los pesos que usa la interfaz.
+const dmSans = localFont({
+  src: [
+    { path: "./fonts/dm-sans-latin-400-normal.woff2", weight: "400", style: "normal" },
+    { path: "./fonts/dm-sans-latin-500-normal.woff2", weight: "500", style: "normal" },
+    { path: "./fonts/dm-sans-latin-600-normal.woff2", weight: "600", style: "normal" },
+    { path: "./fonts/dm-sans-latin-700-normal.woff2", weight: "700", style: "normal" },
+  ],
+  variable: "--fuente-sans",
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+const merriweather = localFont({
+  src: "./fonts/merriweather-latin-700-normal.woff2",
+  weight: "700",
+  variable: "--fuente-serif",
+  adjustFontFallback: "Times New Roman",
 });
 
 export const metadata: Metadata = {
   title: "THEMIS",
-  description: "Consultorio Judídico",
+  description: "Consultorio Jurídico",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html
-      lang="es"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col">{children}</body>
+    <html lang="es" className={`${dmSans.variable} ${merriweather.variable}`}>
+      <body>{children}</body>
     </html>
   );
 }
